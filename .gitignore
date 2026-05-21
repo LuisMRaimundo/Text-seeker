@@ -1,0 +1,41 @@
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Autonomous installers (portable Python per machine)
+installers/runtime/
+
+# User data
+.text-seeker_index/
+.text-seeker_cache/
+.docseeker_index/
+.docseeker_cache/
+
+# Search output / logs
+*.html
+!docs/**/*.html
+test_results.html
+gui_start_error.log
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
