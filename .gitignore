@@ -31,6 +31,16 @@ installers/runtime/
 test_results.html
 gui_start_error.log
 
+# Legacy duplicate modules and internal review notes (not part of releases)
+*_A.py
+*_B.py
+*EVALUATION*.md
+IMPROVEMENTS_*.md
+IMPLEMENTATION_*.md
+UPGRADES_*.md
+NEAR_WILDCARD_*.md
+COLOR_HIGHLIGHTING_*.md
+
 # Editor / OS
 .DS_Store
 Thumbs.db
