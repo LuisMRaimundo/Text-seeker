@@ -269,17 +269,5 @@ def run_interface(search_fn):
     status_label = ttk.Label(main, text="Ready.", relief='sunken')
     status_label.grid(row=12, column=0, columnspan=3, sticky='ew')
 
-    legal_frame = ttk.LabelFrame(main, text="Copyright and use", padding="8")
-    legal_frame.grid(row=13, column=0, columnspan=3, sticky='ew', pady=(8, 0))
-    legal_text = (
-        "Copyright © 2026 Luís Raimundo. All rights reserved.\n"
-        "Proprietary research material. No open-source licence is granted.\n"
-        "Contact: lmr.2020@outlook.pt\n\n"
-        "Acknowledgements: FCT and Universidade NOVA de Lisboa "
-        "(DOI: 10.54499/2020.08817.BD). Thanks to Isabel Pires."
-    )
-    ttk.Label(legal_frame, text=legal_text, wraplength=820, justify='left').pack(anchor='w')
-
     main.columnconfigure(1, weight=1)
-    root.geometry("900x820")
     root.mainloop()

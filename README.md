@@ -35,10 +35,9 @@ run_tests.bat
 
 | File | Contents |
 |------|----------|
-| [README_STARTING.md](README_STARTING.md) | Tesseract, Poppler, manual setup |
+| [README_STARTING.md](README_STARTING.md) | Launch, optional Tesseract & Poppler |
 | [QUICK_GUIDE.md](QUICK_GUIDE.md) | Boolean query syntax |
 | [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) | Architecture |
-| [# Copyright and Use Notice.md](#%20Copyright%20and%20Use%20Notice.md) | Legal terms |
 
 ## Data directories
 

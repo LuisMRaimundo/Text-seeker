@@ -537,9 +537,6 @@ body{
 .header,.footer{ padding:20px; }
 .summary{ padding:14px 18px; margin:16px 0; }
 .file{ margin:24px 0; padding:16px 18px; }
-.legal-footer{ margin-top:28px; padding-top:18px; border-top:1px solid var(--border); font-size:0.92em; color:var(--muted); }
-.legal-footer h2{ font-size:1.05em; margin:1em 0 0.4em; color:var(--text); }
-.legal-footer a{ color:var(--accent); }
 .file-header{ padding:0 0 12px 0; margin:0 0 12px 0; border-bottom:1px solid var(--border); }
 .match{ border-left:4px solid var(--accent); padding-left:12px; margin:14px 0; }
 .context{
@@ -672,15 +669,11 @@ function openWithDefaultApp(filePath,pageNum){
             f.write('</div>\n')  # .file
 
         # Rodapé
-        from legal import COPYRIGHT_HTML
         f.write("""<div class="footer">
 <p>Search complete. Results are sorted by relevance score (higher = better match).</p>
 <p>Highlighted terms appear underlined and shaded.</p>
 <p>Click "Open File" to open the document, or "Copy Path" to copy the file path to clipboard.</p>
 <p>For PDF files, you can open directly to the specific page.</p>
-""")
-        f.write(COPYRIGHT_HTML)
-        f.write("""
 </div>
 
 </div> <!-- fecha .page -->
@@ -815,7 +808,6 @@ def save_index_html(index_path: str, saved: dict, roots: List[str]) -> None:
             rel = os.path.relpath(saved[root], base) if base else os.path.basename(saved[root])
             name = _sanitize_folder_name(root)
             lines.append(f"<li class='item'><a href='{html.escape(rel)}'><strong>{html.escape(name)}</strong></a><br><small>{html.escape(root)}</small></li>")
-    from legal import COPYRIGHT_HTML
-    lines.extend(["</ul>", COPYRIGHT_HTML, "</body></html>"])
+    lines.extend(["</ul></body></html>"])
     with open(index_path, "w", encoding="utf-8", errors="replace") as f:
         f.write("\n".join(lines))
