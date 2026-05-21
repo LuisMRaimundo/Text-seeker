@@ -1,5 +1,7 @@
 # How to Start text-seeker
 
+**See also:** [README.md](README.md) · [QUICK_GUIDE.md](QUICK_GUIDE.md) (query syntax) · [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) (architecture)
+
 ## Quick Start (no Python required)
 
 Use the **one-click installer** — see [installers/README.md](installers/README.md):
@@ -83,19 +85,44 @@ python app.py --dir "C:\docs" --query "query" --types "pdf,txt" --minrel 0.5 --c
    pip install -r requirements.txt
    ```
 
-2. **Check all modules are present:**
-   - `boolean_parser.py`
-   - `text_search.py`
-   - `search_pdf.py`
-   - `html_search.py`
-   - `search_markdown.py`
-   - `search_excel.py`
-   - `search_csv.py`
-   - `ocr_utils.py`
-   - `save_results.py`
-   - `indexing.py`
-   - `performance_optimizer.py`
-   - `main.py`
+2. **Check core modules are present** (project root): `app.py`, `main.py`, `brand.py`, `boolean_parser.py`, `nlp_utils.py`, `text_extract.py`, `indexing.py`, `performance_optimizer.py`, and the `search_*.py` / `html_search.py` / `text_search.py` / `ocr_utils.py` / `save_results.py` files.
+
+## Optional: Tesseract and Poppler
+
+These are **system tools**, not Python packages. **text-seeker works without them** for text-based PDFs and non-OCR formats. Install them when you need **scanned PDFs** or **image OCR**.
+
+### Tesseract OCR
+
+| Platform | Install |
+|----------|---------|
+| **Windows** | [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki) — default path `C:\Program Files\Tesseract-OCR\tesseract.exe` is detected automatically |
+| **macOS** | `brew install tesseract` |
+| **Linux** | `sudo apt install tesseract-ocr` (Debian/Ubuntu) or your distro equivalent |
+
+**Custom path:** set environment variable `TESSERACT_PATH` to the full path of `tesseract.exe` (Windows) or the `tesseract` binary.
+
+On startup, the app prints `[OK] Tesseract: …` when found, or a warning if OCR may be unavailable.
+
+### Poppler (PDF → image for OCR)
+
+Required by `pdf2image` when OCR must render PDF pages to images.
+
+| Platform | Install |
+|----------|---------|
+| **Windows** | [Poppler for Windows](http://blog.alivate.com.au/poppler-windows/) — add the `bin` folder to **PATH**, or set `POPPLER_PATH` to that folder |
+| **macOS** | `brew install poppler` |
+| **Linux** | `sudo apt install poppler-utils` |
+
+If Poppler is missing, text-based PDF search still works; only OCR on scanned pages may fail.
+
+## User data folders
+
+| Purpose | Default path |
+|---------|----------------|
+| Search index | `~/.text-seeker_index/` |
+| PDF/OCR cache | `~/.text-seeker_cache/` |
+
+If you used an older **DocSeeker** build, indexes under `~/.docseeker_index/` are migrated automatically on first run.
 
 ## Main Entry Point
 
@@ -109,23 +136,28 @@ python app.py --dir "C:\docs" --query "query" --types "pdf,txt" --minrel 0.5 --c
 
 ```
 text-seeker/
-├── app.py                    # Main entry point (orchestrator)
-├── main.py                   # GUI interface (run_interface function)
-├── start_gui.bat             # GUI launcher
-├── brand.py                  # App name and paths
+├── app.py                    # Main entry (CLI + GUI launcher)
+├── main.py                   # Tkinter GUI
+├── start_gui.bat             # Windows GUI shortcut (Python on PATH)
+├── run_tests.bat             # Run unit tests
+├── requirements.txt
+├── brand.py                  # App name and data paths
+├── boolean_parser.py         # Boolean query parser
 ├── nlp_utils.py              # Stemming, tokenization
-├── text_extract.py           # Document text extraction
-├── indexing.py               # Full-text indexing
-├── performance_optimizer.py  # Parallel processing, BM25
-├── boolean_parser.py          # Boolean search parser
-├── search_pdf.py             # PDF search
-├── text_search.py            # Text/DOCX search
-├── html_search.py            # HTML search
-├── search_markdown.py        # Markdown search
-├── search_excel.py           # Excel search
-├── search_csv.py              # CSV search
-├── ocr_utils.py               # OCR utilities
-└── save_results.py           # Result export
+├── text_extract.py           # Full-document extraction (index)
+├── indexing.py               # Inverted index (JSON under ~/.text-seeker_index/)
+├── performance_optimizer.py  # Parallel search, BM25
+├── search_pdf.py             # PDF search (+ OCR path)
+├── text_search.py            # TXT / DOCX
+├── html_search.py            # HTML
+├── search_markdown.py        # Markdown
+├── search_excel.py           # Excel
+├── search_csv.py             # CSV
+├── ocr_utils.py              # Tesseract integration
+├── save_results.py           # Export HTML / TXT / CSV / Excel
+├── installers/               # One-click installers (no system Python)
+├── tests/                    # unittest suite
+└── .github/workflows/        # CI (tests on push)
 ```
 
 ## Quick Test
@@ -136,4 +168,4 @@ To verify everything works:
 python app.py --dir "." --query "test" --types "txt" --out test_results.html
 ```
 
-This should search the current directory for "test" in text files and save results to `test_results.html`.
+This searches the current directory for `test` in `.txt` files and writes `test_results.html` (gitignored if you commit from a dev tree).

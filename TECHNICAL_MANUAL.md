@@ -1,4 +1,4 @@
-# text-seeker v4 — Technical Manual
+# text-seeker — Technical Manual
 ## Complete Reference
 
 ---
@@ -35,7 +35,7 @@ The system uses a **shunting-yard** algorithm for query parsing and **RPN** (Rev
 text-seeker/
 ├── app.py                   # Orchestrator; CLI entry
 ├── main.py                  # Tkinter GUI
-├── brand.py                 # App name and data paths
+├── brand.py                 # App name and data paths (~/.text-seeker_*)
 ├── boolean_parser.py        # BooleanSearchParser (shunting-yard, NEAR)
 ├── nlp_utils.py             # Stemming, CJK tokenization
 ├── text_extract.py          # Full-document extraction (index + BM25)
@@ -47,10 +47,14 @@ text-seeker/
 ├── search_csv.py            # CSV
 ├── ocr_utils.py             # Tesseract OCR
 ├── save_results.py          # HTML/TXT/CSV/Excel export
-├── indexing.py              # Inverted index
+├── indexing.py              # Inverted index (JSON; migrates .docseeker_index)
 ├── performance_optimizer.py # ParallelProcessor, BM25
-├── start_gui.bat            # Windows launcher
-└── tests/                   # Unit tests
+├── start_gui.bat            # Windows launcher (dev install)
+├── run_tests.bat            # unittest runner
+├── requirements.txt
+├── installers/              # Autonomous one-click setup
+├── tests/                   # Unit + integration tests
+└── .github/workflows/       # CI
 ```
 
 **Data flow:**
@@ -91,16 +95,20 @@ text-seeker/
 
 ## 3.3 External Dependencies
 
-- **Tesseract OCR**: Must be installed and on PATH (or set `TESSERACT_PATH` / use Windows default paths).
-- **Poppler**: Required for `pdf2image` (PDF → image rendering for OCR).
+- **Tesseract OCR**: Optional but required for image OCR and scanned PDFs. Install on PATH or set `TESSERACT_PATH` (Windows default paths are tried automatically).
+- **Poppler**: Optional; required for `pdf2image` when rendering PDF pages for OCR. On Windows, add Poppler `bin` to PATH or set `POPPLER_PATH`.
+
+See [README_STARTING.md](README_STARTING.md) for platform-specific install steps.
 
 ## 3.4 Installation Commands
 
 ```bash
-pip install PyPDF2 PyMuPDF pytesseract Pillow python-docx beautifulsoup4 openpyxl pdf2image pdfminer.six
-# Optional:
-pip install lxml html5lib chardet
+pip install -r requirements.txt
 ```
+
+## 3.5 One-click install (no system Python)
+
+Use `installers/windows/Install and Run.bat`, `installers/macos/Install and Run.command`, or `installers/linux/install-and-run.sh`. First run downloads a private runtime under `installers/runtime/` (gitignored). Details: [installers/README.md](installers/README.md).
 
 ---
 
@@ -423,6 +431,10 @@ python app.py --dir "C:\Documents" --query "texture AND uniform" --types "txt,pd
 - `--no-subfolders` : Only top-level folder
 - `--max-ocr-pages` : Max PDF pages for OCR (default 150)
 - `--gui` : Launch GUI
+- `--stem` / `--no-stem` : Enable or disable Porter stemming (default: on in typical GUI use)
+- `--accent-sensitive` : Do not fold accents when matching
+
+**Copyright and acknowledgements** appear in [README.md](README.md) only (not in the GUI or exported HTML).
 
 ---
 

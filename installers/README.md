@@ -4,7 +4,12 @@ These launchers install a **private copy** of Python and all **text-seeker** lib
 
 **Requirements:** Internet on first run (~200–400 MB download). Disk space ~600 MB after install. Windows 10/11, macOS 11+, or recent Linux (x86_64 or arm64).
 
-**Optional (for PDF OCR):** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) on your system improves scanned-PDF search. The app runs without it for text-based PDFs.
+**Optional (for scanned PDFs and images):**
+
+- **[Tesseract OCR](https://github.com/tesseract-ocr/tesseract)** — text recognition from images and scanned pages
+- **Poppler** — renders PDF pages for OCR (`pdf2image`); see [README_STARTING.md](../README_STARTING.md)
+
+The app runs without either tool for normal text-based PDFs, DOCX, HTML, TXT, Excel, and CSV.
 
 ---
 
@@ -62,7 +67,8 @@ To reinstall: delete `installers/runtime/` and run the launcher again.
 |---------|-------------|
 | Setup failed | Check internet; retry after deleting `installers/runtime/` |
 | GUI does not open | Run `installers\runtime\windows\python\python.exe app.py --gui` from project root (Windows) |
-| OCR missing | Install Tesseract; see [README_STARTING.md](../README_STARTING.md) |
+| OCR missing / no text in scans | Install Tesseract; set `TESSERACT_PATH` if needed — [README_STARTING.md](../README_STARTING.md) |
+| PDF OCR fails, text PDFs OK | Install Poppler and add its `bin` to PATH (or `POPPLER_PATH` on Windows) — [README_STARTING.md](../README_STARTING.md) |
 
 Diagnostics (any Python 3.10+):
 

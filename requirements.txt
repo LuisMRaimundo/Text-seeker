@@ -1,6 +1,6 @@
-# text-seeker — dependências Python
-# Nota: OCR precisa do Tesseract instalado no sistema (ver TESSERACT_PATH / PATH).
-# Nota: pdf2image requer Poppler no PATH (Windows: instalar poppler e apontar POPPLER_PATH se necessário).
+# text-seeker — Python dependencies
+# OCR: install Tesseract on the system (PATH or TESSERACT_PATH). See README_STARTING.md.
+# pdf2image: requires Poppler on PATH (Windows: POPPLER_PATH). See README_STARTING.md.
 
 beautifulsoup4>=4.12.0
 chardet>=5.0.0

@@ -2,7 +2,9 @@
 
 **Repository:** [github.com/LuisMRaimundo/Text-seeker](https://github.com/LuisMRaimundo/Text-seeker)
 
-Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, images via OCR).
+Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, images via OCR). Runs **offline** on your machine; indexes and caches live under your home directory.
+
+**Supported formats:** TXT, PDF, DOCX, HTML, Markdown, Excel (`.xlsx`/`.xls`), CSV, common image formats (OCR).
 
 ## No Python installed? (one-click)
 
@@ -30,6 +32,21 @@ Or: `start_gui.bat` (Windows, if Python is on PATH).
 ```bat
 run_tests.bat
 ```
+
+Or: `python -m unittest discover -s tests -v`
+
+Continuous integration runs the same test suite on push (see `.github/workflows/test.yml`).
+
+## Repository layout
+
+| Path | Role |
+|------|------|
+| `app.py`, `main.py` | CLI orchestrator and Tkinter GUI |
+| `boolean_parser.py`, `nlp_utils.py` | Query parsing, stemming, tokenization |
+| `indexing.py`, `text_extract.py` | Inverted index and full-document extraction |
+| `search_*.py`, `html_search.py`, `text_search.py` | Per-format search |
+| `installers/` | One-click setup (private Python on first run) |
+| `tests/` | Unit and integration tests |
 
 ## Documentation
 

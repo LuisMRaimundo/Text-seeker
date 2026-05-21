@@ -1,5 +1,7 @@
 # Quick Guide: Boolean Queries
 
+**text-seeker** searches local folders with boolean logic. Supported types: **TXT, PDF, DOCX, HTML, Markdown, Excel, CSV, images (OCR)**.
+
 ## Operators
 - `AND` (also `&&`)
 - `OR` (also `||`)
@@ -31,4 +33,6 @@ Use parentheses to control grouping.
 
 ## Notes
 - Matching is case‑insensitive.
-- Accents are normalized (e.g., `ação` ≈ `acao`).
+- Accents are normalized by default (e.g., `ação` ≈ `acao`). Use **accent-sensitive** in the GUI or `--accent-sensitive` on the CLI to disable folding.
+- **Stemming** is on by default in the GUI (e.g. `piano` matches `pianos`). CLI: `--stem` / `--no-stem`.
+- Full CLI and architecture: [README_STARTING.md](README_STARTING.md), [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md).
