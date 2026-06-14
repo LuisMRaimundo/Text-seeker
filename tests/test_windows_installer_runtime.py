@@ -162,6 +162,38 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
                 msg=f"{name} contains non-ASCII bytes: {non_ascii[:8]}",
             )
 
+    def test_python_selection_default_not_cpython_root(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # Default Python must never be a bare 'C:\Python'.
+        self.assertNotRegex(cfg, r"PythonPath\s*=\s*['\"]C:\\Python['\"]")
+        # Default mode is system or private; private points under the runtime.
+        self.assertIn("$pyMode = if ($detectedPy) { 'system' } else { 'private' }", cfg)
+        self.assertIn("DefaultPrivatePythonDir", cfg)
+
+    def test_custom_python_path_is_resolved_and_validated(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Resolve-PythonExePath", cfg)
+        self.assertIn("function Test-PythonCandidate", cfg)
+        # Validation must check version, pip, tkinter.
+        self.assertIn("PythonMinMinor", cfg)
+        self.assertIn("import tkinter", cfg)
+        self.assertIn("-m pip --version", cfg)
+
+    def test_python_step_block_reason_logic(self):
+        logic = (WINDOWS / "installer_wizard_logic.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Get-PythonStepBlockReason", logic)
+        self.assertIn("Selected Python is not valid", logic)
+        self.assertIn("Install private Python", logic)
+        # Private mode must not be blocked at the Python step.
+        self.assertRegex(logic, r"if \(\$Mode -eq 'private'\) \{ return \$null \}")
+
+    def test_wizard_gates_next_on_python_step(self):
+        ui = SETUP_UI.read_text(encoding="utf-8")
+        self.assertIn("Test-CanLeaveCurrentStep", ui)
+        self.assertIn("Get-PythonStepBlockReason", ui)
+        # Next handler must respect the gate.
+        self.assertIn("if (-not (Test-CanLeaveCurrentStep)) { return }", ui)
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402

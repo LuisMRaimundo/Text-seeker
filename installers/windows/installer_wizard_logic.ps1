@@ -74,6 +74,24 @@ function Test-InstallerWizardCanReachInstall {
     return $false
 }
 
+function Get-PythonStepBlockReason {
+    # Returns $null when the wizard may advance past the Python step,
+    # or a user-facing message explaining why it must not.
+    param(
+        [string]$Mode,
+        [bool]$CandidateReady = $false,
+        [string]$CandidateReason = ''
+    )
+    # Private mode installs Python later; never validate a path here.
+    if ($Mode -eq 'private') { return $null }
+    if ($CandidateReady) { return $null }
+    $base = "Selected Python is not valid. Choose python.exe or select 'Install private Python'."
+    if ($CandidateReason) {
+        return "$base`r`n`r`nDetail: $CandidateReason"
+    }
+    return $base
+}
+
 function New-InstallerWizardSummaryText {
     param([hashtable]$Choices, [string]$LogPath = '')
     return @(

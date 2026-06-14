@@ -127,17 +127,33 @@ function Test-PythonCandidate {
         $result.Reason = "python.exe not found at '$ExePath'. Enter the full path to python.exe (or its folder)."
         return $result
     }
-    $result.Exists = $true
-    $verOut = & $resolved --version 2>&1
-    $result.Version = ($verOut | Select-Object -First 1).ToString()
-    if ($result.Version -match 'Python (\d+)\.(\d+)') {
-        $maj = [int]$Matches[1]; $min = [int]$Matches[2]
-        $result.VersionOk = ($maj -gt $script:PythonMinMajor) -or ($maj -eq $script:PythonMinMajor -and $min -ge $script:PythonMinMinor)
+    # Windows Store execution-alias stubs are not real interpreters; they print an
+    # error and open the Store. Reject them explicitly instead of probing.
+    if ($resolved -match '\\WindowsApps\\') {
+        $result.Reason = "'$resolved' is a Microsoft Store alias, not a real Python. Install Python or choose 'Install private Python'."
+        return $result
     }
-    & $resolved -m pip --version 2>$null | Out-Null
-    $result.PipOk = ($LASTEXITCODE -eq 0)
-    & $resolved -c "import tkinter" 2>$null | Out-Null
-    $result.TkOk = ($LASTEXITCODE -eq 0)
+    $result.Exists = $true
+    # Probe defensively: native stderr must never terminate detection, even when the
+    # caller set $ErrorActionPreference = 'Stop'.
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $verOut = & $resolved --version 2>&1
+        if ($verOut) { $result.Version = ($verOut | Select-Object -First 1 | ForEach-Object { "$_" }) }
+        if ($result.Version -and $result.Version -match 'Python (\d+)\.(\d+)') {
+            $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+            $result.VersionOk = ($maj -gt $script:PythonMinMajor) -or ($maj -eq $script:PythonMinMajor -and $min -ge $script:PythonMinMinor)
+        }
+        & $resolved -m pip --version 2>$null 1>$null
+        $result.PipOk = ($LASTEXITCODE -eq 0)
+        & $resolved -c "import tkinter" 2>$null 1>$null
+        $result.TkOk = ($LASTEXITCODE -eq 0)
+    } catch {
+        # Any probe failure leaves the corresponding flag false.
+    } finally {
+        $ErrorActionPreference = $savedEap
+    }
     $result.Ready = $result.VersionOk -and $result.PipOk -and $result.TkOk
     if (-not $result.Ready) {
         $missing = @()
@@ -178,6 +194,8 @@ function Get-DetectedPythonInstallations {
         try {
             $resolved = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
         } catch { continue }
+        # Skip Windows Store execution-alias stubs (not real interpreters).
+        if ($resolved -match '\\WindowsApps\\') { continue }
         if ($seen.ContainsKey($resolved)) { continue }
         $seen[$resolved] = $true
         $info = Test-PythonCandidate -ExePath $resolved

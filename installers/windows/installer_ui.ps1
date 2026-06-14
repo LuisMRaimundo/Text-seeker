@@ -223,7 +223,10 @@ function Show-WinFormsInstallerWizard {
                 $panel.Controls.Add($script:lstPython)
                 $y += 110
                 Add-Label 'Custom python.exe (or its folder):' 10 $y 240 20; $y += 22
-                $script:txtCustomPy = Add-TextBox $choices.PythonPath 130 $y 440; $y += 35
+                $customDefault = ''
+                if ($choices.PythonMode -eq 'custom') { $customDefault = $choices.PythonPath }
+                elseif ($choices.PythonMode -eq 'system') { $customDefault = $choices.PythonPath }
+                $script:txtCustomPy = Add-TextBox $customDefault 10 $y 560; $y += 35
                 Add-Label 'Private Python folder:' 10 $y 160 20; $y += 22
                 $script:txtPrivatePyDir = Add-TextBox $choices.PrivatePythonDir 170 $y 400
             }
@@ -363,8 +366,29 @@ function Show-WinFormsInstallerWizard {
         }
     }
 
+    function Test-CanLeaveCurrentStep {
+        # Validate the Python step before advancing. Private mode is never blocked here.
+        if ($script:WizardStep -ne 1) { return $true }
+        if ($choices.PythonMode -eq 'private') { return $true }
+
+        $check = Test-PythonCandidate -ExePath $choices.PythonPath
+        $reason = Get-PythonStepBlockReason -Mode $choices.PythonMode -CandidateReady $check.Ready -CandidateReason $check.Reason
+        if (-not $reason) {
+            # Persist the normalized python.exe path so later steps use it.
+            if ($check.Path) { $choices.PythonPath = $check.Path }
+            return $true
+        }
+        [System.Windows.Forms.MessageBox]::Show(
+            $reason,
+            'text-seeker - Python selection',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        return $false
+    }
+
     $btnNext.Add_Click({
         Save-StepChoices
+        if (-not (Test-CanLeaveCurrentStep)) { return }
         $nav = Move-InstallerWizardStep -CurrentStep $script:WizardStep -Direction 'Next' -MaxStep $maxStep
         $script:WizardStep = $nav.Step
         Show-Step

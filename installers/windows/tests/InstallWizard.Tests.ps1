@@ -102,9 +102,41 @@ try {
     $bad = Test-PythonCandidate -ExePath 'C:\NoSuchPythonFolderXYZ'
     Assert-True (-not $bad.Ready) 'Test-PythonCandidate: missing path is not ready'
     Assert-True ($bad.Reason -match 'not found') 'Test-PythonCandidate: missing path reason mentions not found'
+
+    # Default choices must never default Python to a bare 'C:\Python'.
+    $defaults = Get-DefaultInstallChoices
+    Assert-True ($defaults.PythonPath -ne 'C:\Python') 'Default PythonPath is not C:\Python'
+    Assert-True ($defaults.PythonMode -in @('system', 'private')) 'Default PythonMode is system or private'
+    if ($defaults.PythonMode -eq 'private') {
+        Assert-True ($defaults.PythonPath -like '*runtime*windows*python*') 'Private default Python is under the private runtime'
+    }
 } finally {
     Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Python step gating: private never blocks; invalid custom/system blocks with a clear message.
+Assert-True ($null -eq (Get-PythonStepBlockReason -Mode 'private' -CandidateReady $false)) 'Private mode never blocks Next'
+Assert-True ($null -eq (Get-PythonStepBlockReason -Mode 'custom' -CandidateReady $true)) 'Ready custom Python does not block Next'
+$blk = Get-PythonStepBlockReason -Mode 'custom' -CandidateReady $false -CandidateReason 'Missing/incompatible: tkinter'
+Assert-True ($blk -match 'not valid') 'Invalid custom Python blocks with clear message'
+Assert-True ($blk -match 'Install private Python') 'Block message guides to private Python'
+Assert-True ($blk -match 'tkinter') 'Block message includes the failing check detail'
+$blkSys = Get-PythonStepBlockReason -Mode 'system' -CandidateReady $false -CandidateReason 'no pip'
+Assert-True ($blkSys -match 'not valid') 'Invalid system Python also blocks'
+
+# Windows Store alias stubs must be rejected, not probed.
+$storeStub = 'C:\Users\x\AppData\Local\Microsoft\WindowsApps\python3.exe'
+$storeResult = Test-PythonCandidate -ExePath $storeStub
+Assert-True (-not $storeResult.Ready) 'WindowsApps Store alias is not ready'
+
+# Detection must never throw, even under $ErrorActionPreference = Stop.
+$threw = $false
+try { $null = Get-DetectedPythonInstallations } catch { $threw = $true }
+Assert-True (-not $threw) 'Get-DetectedPythonInstallations does not throw under Stop'
+
+# UI must gate Next on the Python step.
+Assert-True ($uiText -match 'Test-CanLeaveCurrentStep') 'UI gates Next with Test-CanLeaveCurrentStep'
+Assert-True ($uiText -match 'Get-PythonStepBlockReason') 'UI uses Get-PythonStepBlockReason'
 
 Write-Host ''
 Write-Host "Results: $passed passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
