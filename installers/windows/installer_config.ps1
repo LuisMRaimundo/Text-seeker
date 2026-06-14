@@ -89,28 +89,63 @@ function Invoke-DownloadOptional {
     }
 }
 
+function Resolve-PythonExePath {
+    param([string]$InputPath)
+    if (-not $InputPath) { return $null }
+    $p = $InputPath.Trim().Trim('"')
+    if (-not $p) { return $null }
+    # If a directory was given, look for python.exe inside it (and common subfolders).
+    if (Test-Path -LiteralPath $p -PathType Container) {
+        foreach ($candidate in @(
+            (Join-Path $p 'python.exe'),
+            (Join-Path $p 'Scripts\python.exe')
+        )) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+        # Fall back to a recursive search (first match) for unusual layouts.
+        $found = Get-ChildItem -LiteralPath $p -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+        return $p  # let caller report "not found"
+    }
+    return $p
+}
+
 function Test-PythonCandidate {
     param([string]$ExePath)
+    $resolved = Resolve-PythonExePath -InputPath $ExePath
     $result = [ordered]@{
-        Path = $ExePath
+        Path = $resolved
+        Exists = $false
         Version = $null
         VersionOk = $false
         PipOk = $false
         TkOk = $false
         Ready = $false
+        Reason = $null
     }
-    if (-not (Test-Path -LiteralPath $ExePath)) { return $result }
-    $verOut = & $ExePath --version 2>&1
+    if (-not $resolved -or -not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        $result.Reason = "python.exe not found at '$ExePath'. Enter the full path to python.exe (or its folder)."
+        return $result
+    }
+    $result.Exists = $true
+    $verOut = & $resolved --version 2>&1
     $result.Version = ($verOut | Select-Object -First 1).ToString()
     if ($result.Version -match 'Python (\d+)\.(\d+)') {
         $maj = [int]$Matches[1]; $min = [int]$Matches[2]
         $result.VersionOk = ($maj -gt $script:PythonMinMajor) -or ($maj -eq $script:PythonMinMajor -and $min -ge $script:PythonMinMinor)
     }
-    & $ExePath -m pip --version 2>$null | Out-Null
+    & $resolved -m pip --version 2>$null | Out-Null
     $result.PipOk = ($LASTEXITCODE -eq 0)
-    & $ExePath -c "import tkinter" 2>$null | Out-Null
+    & $resolved -c "import tkinter" 2>$null | Out-Null
     $result.TkOk = ($LASTEXITCODE -eq 0)
     $result.Ready = $result.VersionOk -and $result.PipOk -and $result.TkOk
+    if (-not $result.Ready) {
+        $missing = @()
+        if (-not $result.VersionOk) { $missing += "Python 3.$($script:PythonMinMinor)+ (found '$($result.Version)')" }
+        if (-not $result.PipOk) { $missing += 'pip' }
+        if (-not $result.TkOk) { $missing += 'tkinter' }
+        $result.Reason = "Missing/incompatible: " + ($missing -join ', ')
+    }
     return $result
 }
 
@@ -389,15 +424,15 @@ function Invoke-InstallerRun {
     $venvDir = $null
     switch ($Choices.PythonMode) {
         'system' {
-            $pyExe = $Choices.PythonPath
-            $check = Test-PythonCandidate -ExePath $pyExe
-            if (-not $check.Ready) { throw "Selected system Python is not ready (need 3.10+, pip, tkinter): $pyExe" }
+            $check = Test-PythonCandidate -ExePath $Choices.PythonPath
+            if (-not $check.Ready) { throw "Selected system Python is not usable. $($check.Reason)" }
+            $pyExe = $check.Path
             if ($Choices.UseVenvForSystemPython) { $venvDir = $Choices.VenvDir }
         }
         'custom' {
-            $pyExe = $Choices.PythonPath
-            $check = Test-PythonCandidate -ExePath $pyExe
-            if (-not $check.Ready) { throw "Custom Python is not ready (need 3.10+, pip, tkinter): $pyExe" }
+            $check = Test-PythonCandidate -ExePath $Choices.PythonPath
+            if (-not $check.Ready) { throw "Custom Python is not usable. $($check.Reason)" }
+            $pyExe = $check.Path
         }
         default {
             $pyExe = Install-PrivatePythonTo -TargetDir $Choices.PrivatePythonDir

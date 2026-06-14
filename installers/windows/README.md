@@ -77,6 +77,7 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 |-------|--------|
 | Installer cancelled | Re-run **Install and Run.bat** |
 | Setup failed on Python/packages | Check log; Python/tkinter/pip/packages are hard requirements |
+| "Custom Python is not usable" | Point Custom Python at a real `python.exe` (or the folder containing it) with Python 3.10+, pip, and tkinter |
 | Tesseract/Poppler failed | Warning only — GUI still runs; OCR features limited |
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |

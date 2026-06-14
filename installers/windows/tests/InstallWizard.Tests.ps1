@@ -87,6 +87,25 @@ foreach ($psName in @('installer_ui.ps1', 'installer_config.ps1', 'installer_wiz
     Assert-Equals 0 $nonAscii.Count "$psName is pure ASCII (no non-ASCII bytes)"
 }
 
+# Python path resolution: a directory containing python.exe must resolve to the exe.
+. (Join-Path $windowsDir 'installer_config.ps1')
+
+$tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-pytest-" + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+$fakeExe = Join-Path $tmpRoot 'python.exe'
+Set-Content -LiteralPath $fakeExe -Value '' -Encoding ASCII
+try {
+    Assert-Equals $fakeExe (Resolve-PythonExePath -InputPath $tmpRoot) 'Resolve-PythonExePath: directory resolves to python.exe'
+    Assert-Equals $fakeExe (Resolve-PythonExePath -InputPath $fakeExe) 'Resolve-PythonExePath: file path returned as-is'
+    Assert-Equals $fakeExe (Resolve-PythonExePath -InputPath ('"' + $tmpRoot + '"')) 'Resolve-PythonExePath: trims surrounding quotes'
+
+    $bad = Test-PythonCandidate -ExePath 'C:\NoSuchPythonFolderXYZ'
+    Assert-True (-not $bad.Ready) 'Test-PythonCandidate: missing path is not ready'
+    Assert-True ($bad.Reason -match 'not found') 'Test-PythonCandidate: missing path reason mentions not found'
+} finally {
+    Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host ''
 Write-Host "Results: $passed passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
 if ($failed -gt 0) { exit 1 }

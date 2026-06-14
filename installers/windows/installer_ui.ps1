@@ -39,7 +39,7 @@ function Show-ConsoleInstallerWizard {
         }
         '3' {
             $choices.PythonMode = 'custom'
-            $choices.PythonPath = Read-Host 'Full path to python.exe'
+            $choices.PythonPath = Read-Host 'Full path to python.exe (or the folder containing it)'
         }
         default {
             $choices.PythonMode = 'private'
@@ -222,7 +222,7 @@ function Show-WinFormsInstallerWizard {
                 }
                 $panel.Controls.Add($script:lstPython)
                 $y += 110
-                Add-Label 'Custom python.exe:' 10 $y 120 20; $y += 22
+                Add-Label 'Custom python.exe (or its folder):' 10 $y 240 20; $y += 22
                 $script:txtCustomPy = Add-TextBox $choices.PythonPath 130 $y 440; $y += 35
                 Add-Label 'Private Python folder:' 10 $y 160 20; $y += 22
                 $script:txtPrivatePyDir = Add-TextBox $choices.PrivatePythonDir 170 $y 400
