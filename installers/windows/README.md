@@ -29,7 +29,7 @@ Runtime data (not in Git): `installers\runtime\windows\` — Python, tools, `ins
 
 | Component | Options |
 |-----------|---------|
-| **Python** | Use detected system Python (venv for packages), install private Python (official amd64 + Tcl/Tk), or custom `python.exe` path |
+| **Python** | Use detected system Python (venv for packages), install private Python (official amd64 + Tcl/Tk), or custom path. Custom accepts a `python.exe` **or its folder**; it is validated for Python 3.10+, pip, and tkinter before continuing. Windows Store alias stubs are rejected. |
 | **Packages** | Install `requirements.txt` into the chosen environment |
 | **Tesseract** | Install private, use detected, custom path, or skip |
 | **Poppler** | Install private, use detected, custom bin folder, or skip |
