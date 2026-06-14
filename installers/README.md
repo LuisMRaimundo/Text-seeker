@@ -2,9 +2,18 @@
 
 These launchers install a **private copy** of Python and all **text-seeker** libraries on **first run**, then open the desktop search window. You do **not** need Python, pip, or conda installed.
 
-**Requirements:** Internet on first run (~200–400 MB download). Disk space ~600 MB after install. Windows 10/11, macOS 11+, or recent Linux (x86_64 or arm64).
+**Requirements:** Internet on first run (~300–600 MB download). Disk space ~1 GB after install. Windows 10/11 **x64**, macOS 11+, or recent Linux (x86_64 or arm64).
 
-**Optional (for scanned PDFs and images):**
+**Windows private runtime (first run):**
+
+- Python 3.11 with **Tcl/Tk** and pip (official installer, local target — not embed ZIP)
+- Python packages from `requirements.txt`
+- **Tesseract OCR** (UB Mannheim build, pinned version in `installers/common/config.py`)
+- **Poppler** binaries (pinned release zip)
+
+The launcher prepends private tool paths to **process PATH** — it does **not** modify system PATH by default.
+
+**Optional (manual / dev installs):**
 
 - **[Tesseract OCR](https://github.com/tesseract-ocr/tesseract)** — text recognition from images and scanned pages
 - **Poppler** — renders PDF pages for OCR (`pdf2image`); see [README_STARTING.md](../README_STARTING.md)
@@ -54,8 +63,10 @@ chmod +x installers/linux/install-and-run.sh installers/linux/setup-runtime.sh
 
 | Location | Contents |
 |----------|----------|
-| `installers/runtime/` | Private Python + pip packages (gitignored) |
+| `installers/runtime/` | Private Python + pip packages + Windows Tesseract/Poppler (gitignored) |
 | Desktop | **text-seeker** Tkinter GUI |
+
+Diagnostics: `python installers/common/bootstrap.py doctor`
 
 To reinstall: delete `installers/runtime/` and run the launcher again.
 

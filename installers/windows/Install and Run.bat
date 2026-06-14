@@ -12,6 +12,7 @@ set "PY=%ROOT%\installers\runtime\windows\python\python.exe"
 set "BOOT=%ROOT%\installers\common\bootstrap.py"
 set "SETUP=%ROOT%\installers\windows\setup.ps1"
 set "LOG=%ROOT%\installers\runtime\windows\install.log"
+set "STAMP=%ROOT%\installers\runtime\.install_ok"
 
 echo.
 echo  *** USE THIS FILE FOR NORMAL INSTALL ***
@@ -30,11 +31,15 @@ if not exist "%BOOT%" (
   exit /b 1
 )
 
-if not exist "%PY%" (
-  echo First run: installing portable Python and libraries...
-  echo Internet connection required. This may take several minutes.
+if not exist "%PY%" if not exist "%STAMP%" (
+  echo First run: installing private Python ^(official installer^), OCR tools, and libraries...
+  echo NOT the old ~25 MB embeddable Python zip.
+  echo Internet connection required. This may take 20-40 minutes.
   echo Log: %LOG%
   echo.
+)
+
+if not exist "%PY%" (
   if not exist "%SETUP%" (
     echo ERROR: setup.ps1 not found at:
     echo   %SETUP%
@@ -46,22 +51,37 @@ if not exist "%PY%" (
     echo.
     echo Setup failed. See log:
     echo   %LOG%
+    echo Suggested action: check internet connection, delete installers\runtime\ and retry.
     pause
     exit /b 1
   )
 )
 
 if not exist "%PY%" (
-  echo ERROR: Portable Python was not installed.
+  echo ERROR: Private Python was not installed.
   echo See log: %LOG%
   pause
   exit /b 1
 )
 
+if not exist "%STAMP%" (
+  echo WARNING: Install stamp missing; running setup again...
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SETUP%"
+  if errorlevel 1 (
+    echo Setup failed. See log: %LOG%
+    pause
+    exit /b 1
+  )
+)
+
 "%PY%" "%BOOT%" launch
 set "EXITCODE=%ERRORLEVEL%"
 echo.
-if not "%EXITCODE%"=="0" echo The app exited with code %EXITCODE%.
+if not "%EXITCODE%"=="0" (
+  echo The app exited with code %EXITCODE%.
+  echo See log: %LOG%
+  echo Run diagnostics: "%PY%" "%BOOT%" doctor
+)
 echo You can close this window.
 pause
 exit /b %EXITCODE%
