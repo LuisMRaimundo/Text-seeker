@@ -8,6 +8,19 @@ from pathlib import Path
 
 PYTHON_VERSION = "3.11.9"
 PBS_TAG = "20240415"
+STAMP_VERSION = "2"
+
+# Pinned third-party Windows runtimes (keep in sync with installers/windows/setup.ps1)
+WINDOWS_TESSERACT_VERSION = "5.4.0.20240606"
+WINDOWS_TESSERACT_INSTALLER = (
+    "https://digi.bib.uni-mannheim.de/tesseract/"
+    f"tesseract-ocr-w64-setup-{WINDOWS_TESSERACT_VERSION}.exe"
+)
+WINDOWS_POPPLER_VERSION = "24.08.0-0"
+WINDOWS_POPPLER_ZIP = (
+    "https://github.com/oschwartz10612/poppler-windows/releases/download/"
+    f"v{WINDOWS_POPPLER_VERSION}/Release-{WINDOWS_POPPLER_VERSION}.zip"
+)
 
 INSTALLERS_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = INSTALLERS_DIR.parent
@@ -35,6 +48,81 @@ def machine_key() -> str:
     raise RuntimeError(f"Unsupported CPU architecture: {platform.machine()}")
 
 
+def windows_runtime_root() -> Path:
+    return RUNTIME_DIR / "windows"
+
+
+def windows_install_log() -> Path:
+    return windows_runtime_root() / "install.log"
+
+
+def runtime_python_dir(platform_name: str) -> Path:
+    return RUNTIME_DIR / platform_name / "python"
+
+
+def runtime_python_exe(platform_name: str) -> Path:
+    base = runtime_python_dir(platform_name)
+    if platform_name == "windows":
+        return base / "python.exe"
+    return base / "bin" / "python3"
+
+
+def windows_python_installer_url() -> str:
+    return (
+        f"https://www.python.org/ftp/python/{PYTHON_VERSION}/"
+        f"python-{PYTHON_VERSION}-amd64.exe"
+    )
+
+
+FORBIDDEN_WINDOWS_PYTHON_URL_PARTS = (
+    "embed-amd64",
+    "embed-win32",
+    "embed-arm64",
+    "get-pip.py",
+)
+
+
+def assert_official_windows_python_installer_url(url: str) -> None:
+    """Reject legacy embeddable-Python URLs — GUI requires full Tcl/Tk runtime."""
+    lower = url.lower()
+    for part in FORBIDDEN_WINDOWS_PYTHON_URL_PARTS:
+        if part in lower:
+            raise ValueError(
+                f"Forbidden Windows Python URL (embed/get-pip not allowed): {url!r}"
+            )
+    if not lower.endswith("-amd64.exe"):
+        raise ValueError(f"Windows Python URL must be official amd64 .exe installer: {url!r}")
+
+
+def windows_tesseract_dir() -> Path:
+    return windows_runtime_root() / "tesseract"
+
+
+def windows_tesseract_exe() -> Path:
+    return windows_tesseract_dir() / "tesseract.exe"
+
+
+def windows_tesseract_tessdata_dir() -> Path:
+    return windows_tesseract_dir() / "tessdata"
+
+
+def windows_poppler_root() -> Path:
+    return windows_runtime_root() / "poppler"
+
+
+def windows_poppler_bin() -> Path:
+    """Return Poppler bin directory (normalized after setup extract)."""
+    direct = windows_poppler_root() / "bin"
+    if direct.is_dir():
+        return direct
+    library = windows_poppler_root() / "Library" / "bin"
+    if library.is_dir():
+        return library
+    for candidate in windows_poppler_root().rglob("pdftotext.exe"):
+        return candidate.parent
+    return direct
+
+
 def pbs_artifact(platform_name: str, arch: str) -> str:
     triples = {
         ("windows", "x86_64"): "x86_64-pc-windows-msvc",
@@ -57,19 +145,17 @@ def pbs_download_url(platform_name: str, arch: str) -> str:
     )
 
 
-def windows_embed_zip_url() -> str:
+def stamp_payload(
+    *,
+    tesseract_ok: bool = False,
+    poppler_ok: bool = False,
+) -> str:
+    req = REQUIREMENTS.stat().st_mtime_ns if REQUIREMENTS.is_file() else 0
     return (
-        f"https://www.python.org/ftp/python/{PYTHON_VERSION}/"
-        f"python-{PYTHON_VERSION}-embed-amd64.zip"
+        f"v={STAMP_VERSION}\n"
+        f"root={PROJECT_ROOT.resolve()}\n"
+        f"requirements={req}\n"
+        f"python={PYTHON_VERSION}\n"
+        f"tesseract={WINDOWS_TESSERACT_VERSION if tesseract_ok else 'missing'}\n"
+        f"poppler={WINDOWS_POPPLER_VERSION if poppler_ok else 'missing'}\n"
     )
-
-
-def runtime_python_dir(platform_name: str) -> Path:
-    return RUNTIME_DIR / platform_name / "python"
-
-
-def runtime_python_exe(platform_name: str) -> Path:
-    base = runtime_python_dir(platform_name)
-    if platform_name == "windows":
-        return base / "python.exe"
-    return base / "bin" / "python3"
