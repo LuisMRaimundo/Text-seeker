@@ -22,6 +22,7 @@ from config import (
     STAMP_FILE,
     assert_official_windows_python_installer_url,
     machine_key,
+    ocr_tools_stamp,
     pbs_download_url,
     platform_key,
     runtime_python_dir,
@@ -163,23 +164,21 @@ def ensure_app_installed(py: Path) -> None:
     _log("Install complete.")
 
 
+def windows_process_path_parts(py: Path) -> list[str]:
+    """Process-local PATH entries prepended at launch (does not modify global/user PATH)."""
+    py_dir = py.parent
+    return [
+        str(py_dir),
+        str(py_dir / "Scripts"),
+        str(windows_tesseract_dir()),
+        str(windows_poppler_bin()),
+    ]
+
+
 def windows_process_env(py: Path) -> dict[str, str]:
     env = os.environ.copy()
-    path_parts: list[str] = []
-
-    poppler_bin = windows_poppler_bin()
-    if poppler_bin.is_dir():
-        path_parts.append(str(poppler_bin))
-
-    tess_dir = windows_tesseract_dir()
-    if tess_dir.is_dir():
-        path_parts.append(str(tess_dir))
-
-    py_dir = py.parent
-    path_parts.extend([str(py_dir), str(py_dir / "Scripts")])
-
-    if path_parts:
-        env["PATH"] = os.pathsep.join(path_parts) + os.pathsep + env.get("PATH", "")
+    path_parts = windows_process_path_parts(py)
+    env["PATH"] = os.pathsep.join(path_parts) + os.pathsep + env.get("PATH", "")
 
     tess_exe = windows_tesseract_exe()
     if tess_exe.is_file():
@@ -189,6 +188,7 @@ def windows_process_env(py: Path) -> dict[str, str]:
     if tessdata.is_dir():
         env["TESSDATA_PREFIX"] = str(tessdata)
 
+    poppler_bin = windows_poppler_bin()
     if poppler_bin.is_dir():
         env["POPPLER_PATH"] = str(poppler_bin)
 
@@ -333,22 +333,26 @@ def cmd_doctor(_: argparse.Namespace) -> int:
             else:
                 _doctor_line("pdftoppm", str(pdftoppm), warn=bool(py_found))
 
-        ocr_cap = tess_ok
-        pdf_ocr_cap = tess_ok and pop_ok
-        ocr_warn = bool(py_found and not ocr_cap)
-        pdf_ocr_warn = bool(py_found and not pdf_ocr_cap)
-        _doctor_line(
-            "OCR capability",
-            "available" if ocr_cap else "unavailable (Tesseract missing)",
-            ok=True if ocr_cap else (False if not py_found else None),
-            warn=ocr_warn,
-        )
-        _doctor_line(
-            "Scanned PDF OCR capability",
-            "available" if pdf_ocr_cap else "unavailable (Tesseract and/or Poppler missing)",
-            ok=True if pdf_ocr_cap else (False if not py_found else None),
-            warn=pdf_ocr_warn,
-        )
+        ocr_tag = ocr_tools_stamp(tesseract_ok=tess_ok, poppler_ok=pop_ok)
+        if ocr_tag == "ok":
+            _doctor_line("OCR capability", "ok (Tesseract and Poppler available)", ok=True)
+        elif ocr_tag == "partial":
+            detail = []
+            if not tess_ok:
+                detail.append("Tesseract missing")
+            if not pop_ok:
+                detail.append("Poppler missing")
+            _doctor_line(
+                "OCR capability",
+                f"partial ({', '.join(detail)})",
+                warn=bool(py_found),
+            )
+        else:
+            _doctor_line(
+                "OCR capability",
+                "missing (Tesseract and Poppler unavailable)",
+                warn=bool(py_found),
+            )
         _doctor_line("Install log", str(windows_install_log()), ok=windows_install_log().is_file())
 
     _append_install_log("=== bootstrap doctor end ===")

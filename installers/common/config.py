@@ -160,12 +160,22 @@ def pbs_download_url(platform_name: str, arch: str) -> str:
     )
 
 
+def ocr_tools_stamp(*, tesseract_ok: bool, poppler_ok: bool) -> str:
+    """Stamp value: ok (both tools), partial (one), missing (neither)."""
+    if tesseract_ok and poppler_ok:
+        return "ok"
+    if tesseract_ok or poppler_ok:
+        return "partial"
+    return "missing"
+
+
 def stamp_payload(
     *,
     tesseract_ok: bool = False,
     poppler_ok: bool = False,
 ) -> str:
     req = REQUIREMENTS.stat().st_mtime_ns if REQUIREMENTS.is_file() else 0
+    ocr = ocr_tools_stamp(tesseract_ok=tesseract_ok, poppler_ok=poppler_ok)
     return (
         f"v={STAMP_VERSION}\n"
         f"root={PROJECT_ROOT.resolve()}\n"
@@ -173,4 +183,5 @@ def stamp_payload(
         f"python={PYTHON_VERSION}\n"
         f"tesseract={WINDOWS_TESSERACT_VERSION if tesseract_ok else 'missing'}\n"
         f"poppler={WINDOWS_POPPLER_VERSION if poppler_ok else 'missing'}\n"
+        f"ocr_tools={ocr}\n"
     )

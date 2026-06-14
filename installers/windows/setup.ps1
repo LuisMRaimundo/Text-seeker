@@ -55,6 +55,13 @@ function Test-WindowsAmd64 {
     return $false
 }
 
+function Get-OcrToolsTag {
+    param([bool]$TesseractOk, [bool]$PopplerOk)
+    if ($TesseractOk -and $PopplerOk) { return 'ok' }
+    if ($TesseractOk -or $PopplerOk) { return 'partial' }
+    return 'missing'
+}
+
 function Get-StampPayload {
     param([bool]$TesseractOk, [bool]$PopplerOk)
     $reqTicks = 0
@@ -63,6 +70,7 @@ function Get-StampPayload {
     }
     $tessTag = if ($TesseractOk) { $TesseractVersion } else { 'missing' }
     $popTag = if ($PopplerOk) { $PopplerVersion } else { 'missing' }
+    $ocrTag = Get-OcrToolsTag -TesseractOk $TesseractOk -PopplerOk $PopplerOk
     return @(
         'v=2'
         "root=$Root"
@@ -70,6 +78,7 @@ function Get-StampPayload {
         "python=$PythonVersion"
         "tesseract=$tessTag"
         "poppler=$popTag"
+        "ocr_tools=$ocrTag"
     ) -join "`n"
 }
 
@@ -232,9 +241,9 @@ function Install-Tesseract {
 
     $downloaded = Invoke-DownloadWithFallback -Urls $TesseractInstallerUrls -Dest $tessInstaller
     if (-not $downloaded) {
-        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
+        Write-InstallLog 'Tesseract unavailable; OCR for scanned images may not work.' 'WARN'
         Write-Host ''
-        Write-Host 'WARNING: Tesseract download failed (403/404/timeout on all mirrors).' -ForegroundColor Yellow
+        Write-Host 'WARNING: Tesseract unavailable; OCR for scanned images may not work.' -ForegroundColor Yellow
         Write-Host 'Text search and GUI still work; OCR/scanned PDF features are disabled.' -ForegroundColor Yellow
         $script:TesseractOk = $false
         return
@@ -260,7 +269,7 @@ function Install-Tesseract {
         }
     } catch {
         Write-InstallLog "Tesseract installer failed: $($_.Exception.Message)" 'WARN'
-        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
+        Write-InstallLog 'Tesseract unavailable; OCR for scanned images may not work.' 'WARN'
         $script:TesseractOk = $false
         return
     }
@@ -274,8 +283,7 @@ function Install-Tesseract {
     }
 
     if (-not (Test-Path -LiteralPath $TesseractExe)) {
-        Write-InstallLog "Tesseract was not installed; OCR/scanned-PDF features will be unavailable." 'WARN'
-        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
+        Write-InstallLog 'Tesseract unavailable; OCR for scanned images may not work.' 'WARN'
         $script:TesseractOk = $false
         return
     }
@@ -298,9 +306,9 @@ function Install-Poppler {
 
     $downloaded = Invoke-DownloadOptional -Url $PopplerZipUrl -Dest $zipPath -ToolName 'Poppler'
     if (-not $downloaded) {
-        Write-InstallLog 'Poppler download failed; PDF page rendering for OCR may fail, but text search and GUI can still run.' 'WARN'
+        Write-InstallLog 'Poppler unavailable; scanned-PDF conversion may not work.' 'WARN'
         Write-Host ''
-        Write-Host 'WARNING: Poppler download failed.' -ForegroundColor Yellow
+        Write-Host 'WARNING: Poppler unavailable; scanned-PDF conversion may not work.' -ForegroundColor Yellow
         Write-Host 'Text-based PDF search still works; scanned PDF OCR may fail.' -ForegroundColor Yellow
         $script:PopplerOk = $false
         return
@@ -314,14 +322,14 @@ function Install-Poppler {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $PopplerRoot -Force
     } catch {
         Write-InstallLog "Poppler extract failed: $($_.Exception.Message)" 'WARN'
-        Write-InstallLog 'Poppler download failed; PDF page rendering for OCR may fail, but text search and GUI can still run.' 'WARN'
+        Write-InstallLog 'Poppler unavailable; scanned-PDF conversion may not work.' 'WARN'
         $script:PopplerOk = $false
         return
     }
 
     $foundPdftotext = Get-ChildItem -Path $PopplerRoot -Filter 'pdftotext.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $foundPdftotext) {
-        Write-InstallLog "Poppler pdftotext.exe not found after extract; PDF OCR rendering may fail." 'WARN'
+        Write-InstallLog 'Poppler unavailable; scanned-PDF conversion may not work.' 'WARN'
         $script:PopplerOk = $false
         return
     }
@@ -379,15 +387,15 @@ try {
     Install-Poppler
 
     if (-not $script:TesseractOk) {
-        Write-InstallLog 'WARNING: Tesseract OCR unavailable — image OCR and scanned PDFs disabled.' 'WARN'
+        Write-InstallLog 'Tesseract unavailable; OCR for scanned images may not work.' 'WARN'
         Write-Host ''
-        Write-Host 'WARNING: Tesseract OCR was not installed.' -ForegroundColor Yellow
-        Write-Host 'Text search still works; OCR/scanned PDF features are disabled.' -ForegroundColor Yellow
+        Write-Host 'WARNING: Tesseract unavailable; OCR for scanned images may not work.' -ForegroundColor Yellow
+        Write-Host 'Text search and GUI still work; OCR/scanned PDF features are disabled.' -ForegroundColor Yellow
     }
     if (-not $script:PopplerOk) {
-        Write-InstallLog 'WARNING: Poppler unavailable — PDF page rendering for OCR may fail.' 'WARN'
+        Write-InstallLog 'Poppler unavailable; scanned-PDF conversion may not work.' 'WARN'
         Write-Host ''
-        Write-Host 'WARNING: Poppler was not installed.' -ForegroundColor Yellow
+        Write-Host 'WARNING: Poppler unavailable; scanned-PDF conversion may not work.' -ForegroundColor Yellow
         Write-Host 'Text-based PDF search still works; scanned PDF OCR may fail.' -ForegroundColor Yellow
     }
 
