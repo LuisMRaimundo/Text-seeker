@@ -78,7 +78,7 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | Installer cancelled | Re-run **Install and Run.bat** |
 | Setup failed on Python/packages | Check log; Python/tkinter/pip/packages are hard requirements |
 | "Custom Python is not usable" | Point Custom Python at a real `python.exe` (or the folder containing it) with Python 3.10+, pip, and tkinter |
-| "python.exe not found" after private install | If Python 3.11.9 was already installed per-user, the official installer may repair in place instead of using the private folder. The installer now detects this and uses `%LOCALAPPDATA%\Programs\Python\Python311\python.exe`. Check `install.log` for the resolved path. |
+| "python.exe not found" after private install | If Python 3.11.9 is already installed on the PC, the official installer may repair it in place and ignore the private `TargetDir`. The installer reports this clearly (and logs the existing per-user Python as a diagnostic, without using it). Either choose **Use detected system Python**, or uninstall the existing Python and retry. See `installers\runtime\windows\python-installer.log`. |
 | Tesseract/Poppler failed | Warning only — GUI still runs; OCR features limited |
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |
