@@ -259,19 +259,40 @@ function Find-PythonExeUnder {
     return $null
 }
 
+function Test-PrivatePythonValid {
+    # B10: validate the private interpreter end to end (sys/pip/tkinter).
+    param([string]$PyExe)
+    if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf)) { return $false }
+    $probe = 'import sys, pip, tkinter; print(sys.executable); tkinter.Tk().destroy(); print("tkinter OK")'
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $out = & $PyExe -c $probe 2>&1
+        $ok = ($LASTEXITCODE -eq 0) -and ("$out" -match 'tkinter OK')
+    } catch {
+        $ok = $false
+    } finally {
+        $ErrorActionPreference = $savedEap
+    }
+    return $ok
+}
+
 function Install-PrivatePythonTo {
     param([string]$TargetDir)
     Assert-OfficialPythonInstallerUrl -Url $script:PythonInstallerUrl
     $pyExe = Join-Path $TargetDir 'python.exe'
-    if (Test-Path -LiteralPath $pyExe) {
-        $check = Test-PythonCandidate -ExePath $pyExe
-        if ($check.TkOk) {
-            Write-InstallLog "Private Python already present: $pyExe"
+    $pythonInstallerLog = Join-Path $RuntimeRoot 'python-installer.log'
+
+    # B7: reuse only a complete, valid private Python; otherwise remove stale/partial dir.
+    if (Test-Path -LiteralPath $TargetDir) {
+        if ((Test-Path -LiteralPath $pyExe -PathType Leaf) -and (Test-PrivatePythonValid -PyExe $pyExe)) {
+            Write-InstallLog "Private Python already present and valid: $pyExe"
             return $pyExe
         }
-        Write-InstallLog 'Replacing private Python (Tkinter missing).' 'WARN'
-        Remove-Item -LiteralPath $TargetDir -Recurse -Force
+        Write-InstallLog "Removing stale/partial private Python directory: $TargetDir" 'WARN'
+        Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
     $installerPath = Join-Path $Temp 'python-installer.exe'
     Write-InstallLog "Downloading Python $PythonVersion installer: $script:PythonInstallerUrl"
@@ -281,57 +302,74 @@ function Install-PrivatePythonTo {
     }
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 
-    # Per-user, no admin, no system PATH. TargetDir is honored by the official installer.
+    # B3/B4: explicit argument array (no fragile string interpolation).
+    # Per-user, no admin, no system PATH. Core components stay enabled.
     $pyArgs = @(
         '/quiet'
+        "/log"
+        "$pythonInstallerLog"
         'InstallAllUsers=0'
         'PrependPath=0'
         'AssociateFiles=0'
         'Shortcuts=0'
+        'Include_exe=1'
+        'Include_lib=1'
+        'Include_pip=1'
+        'Include_tcltk=1'
         'Include_launcher=0'
         'InstallLauncherAllUsers=0'
         'Include_test=0'
         'Include_doc=0'
-        'Include_pip=1'
-        'Include_tcltk=1'
         "TargetDir=$TargetDir"
     )
-    Write-InstallLog ("Running Python installer: " + ($pyArgs -join ' '))
+
+    # B6: log everything needed to diagnose a failed install.
+    Write-InstallLog "Python installer path: $installerPath"
+    Write-InstallLog ("Python installer args: " + ($pyArgs -join ' '))
+    Write-InstallLog "Expected TargetDir: $TargetDir"
+    Write-InstallLog "Expected python.exe: $pyExe"
+    Write-InstallLog "Python installer log: $pythonInstallerLog"
+
     $proc = Start-Process -FilePath $installerPath -ArgumentList $pyArgs -Wait -PassThru
     Write-InstallLog "Python installer exit code: $($proc.ExitCode)"
     # 0 = success, 3010 = success but reboot requested.
     if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-        throw "Python installer failed (exit $($proc.ExitCode)). See log: $script:InstallLogPath"
+        throw "Python installer failed (exit $($proc.ExitCode)). See log: $pythonInstallerLog"
     }
 
-    # Wait for python.exe to appear at the target (installer may finish asynchronously).
+    # Wait for python.exe at the target (installer can finish asynchronously).
     if (-not (Wait-ForFile -Path $pyExe -TimeoutSeconds 90)) {
-        Write-InstallLog "python.exe not at $pyExe yet; searching target and default locations." 'WARN'
-        $located = Find-PythonExeUnder -Root $TargetDir
-        if (-not $located) {
-            # The installer may have ignored TargetDir and used its default per-user dir.
-            $verNoDots = ($PythonVersion -split '\.')[0..1] -join ''
-            $fallbacks = @(
-                (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots\python.exe"),
-                (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots-32\python.exe")
-            )
-            foreach ($fb in $fallbacks) {
-                if (Test-Path -LiteralPath $fb -PathType Leaf) { $located = $fb; break }
+        Write-InstallLog "python.exe not at expected target yet; searching private runtime area." 'WARN'
+
+        # B8: search ONLY within the private runtime area for a usable interpreter.
+        $located = Find-PythonExeUnder -Root $RuntimeRoot
+        if ($located) {
+            Write-InstallLog "Found private python.exe candidate: $located"
+            $pyExe = $located
+        }
+
+        # Per-user default location is logged as DIAGNOSTIC only -- never used silently (B8/B9).
+        $verNoDots = ($PythonVersion -split '\.')[0..1] -join ''
+        foreach ($diag in @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots\python.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots-32\python.exe")
+        )) {
+            if (Test-Path -LiteralPath $diag -PathType Leaf) {
+                Write-InstallLog "DIAGNOSTIC: a Python exists at $diag (not used; private install expected under $TargetDir). The official installer likely repaired an existing install instead of installing to TargetDir." 'WARN'
             }
         }
-        if ($located) {
-            Write-InstallLog "Using Python found at: $located" 'WARN'
-            $pyExe = $located
-        } else {
-            throw "Python installer finished (exit $($proc.ExitCode)) but python.exe was not found under $TargetDir or the default per-user location. See log: $script:InstallLogPath"
+
+        if (-not (Test-Path -LiteralPath $pyExe -PathType Leaf)) {
+            throw "Private Python installation did not produce python.exe under $RuntimeRoot. If Python $PythonVersion is already installed on this PC, the official installer may have repaired it in place. Choose 'Use detected system Python' instead, or uninstall the existing Python and retry. See log: $pythonInstallerLog"
         }
     }
 
-    $check = Test-PythonCandidate -ExePath $pyExe
-    if (-not $check.TkOk) {
-        throw "Private Python installed but Tkinter is not available ($($check.Reason)). See log: $script:InstallLogPath"
+    # B10: full validation of the private interpreter.
+    if (-not (Test-PrivatePythonValid -PyExe $pyExe)) {
+        $check = Test-PythonCandidate -ExePath $pyExe
+        throw "Private Python installed but failed validation ($($check.Reason)). See log: $pythonInstallerLog"
     }
-    Write-InstallLog "Private Python ready: $pyExe ($($check.Version))"
+    Write-InstallLog "Private Python ready: $pyExe"
     return $pyExe
 }
 

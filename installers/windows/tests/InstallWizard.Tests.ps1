@@ -152,7 +152,26 @@ try {
 $cfgText = Get-Content -LiteralPath (Join-Path $windowsDir 'installer_config.ps1') -Raw
 Assert-True ($cfgText -notmatch '\$args\s*=') 'installer_config.ps1 does not assign to automatic $args'
 Assert-True ($cfgText -match 'Find-PythonExeUnder') 'installer_config.ps1 has python.exe locate fallback'
-Assert-True ($cfgText -match 'LOCALAPPDATA') 'installer_config.ps1 has default per-user location fallback'
+
+# Private Python installer argument strategy.
+Assert-True ($cfgText -match '\$pyArgs = @\(') 'Python installer uses an argument array'
+foreach ($tok in @('TargetDir=$TargetDir','Include_exe=1','Include_lib=1','Include_pip=1','Include_tcltk=1','PrependPath=0','InstallAllUsers=0','/log')) {
+    Assert-True ($cfgText -match [regex]::Escape($tok)) "Python installer args include $tok"
+}
+
+# Per-user location is diagnostic-only; private search scoped to runtime root.
+Assert-True ($cfgText -match 'DIAGNOSTIC') 'Per-user Python location is logged as diagnostic'
+Assert-True ($cfgText -match 'Find-PythonExeUnder -Root \$RuntimeRoot') 'Private search is scoped to the runtime root'
+Assert-True ($cfgText -match 'import sys, pip, tkinter') 'Private Python validated end to end'
+
+# Validation must run end to end and not silently accept a per-user interpreter.
+$tmp3 = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-validpy-" + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tmp3 | Out-Null
+try {
+    Assert-True (-not (Test-PrivatePythonValid -PyExe (Join-Path $tmp3 'python.exe'))) 'Test-PrivatePythonValid false for missing python.exe'
+} finally {
+    Remove-Item -LiteralPath $tmp3 -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # UI must gate Next on the Python step.
 Assert-True ($uiText -match 'Test-CanLeaveCurrentStep') 'UI gates Next with Test-CanLeaveCurrentStep'

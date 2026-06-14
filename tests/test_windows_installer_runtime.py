@@ -198,14 +198,38 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # Must not use the automatic $args variable for installer arguments.
         self.assertNotRegex(cfg, r"\$args\s*=")
-        # Must tolerate async completion and TargetDir being ignored (repair mode).
+        # Must tolerate async completion.
         self.assertIn("Wait-ForFile", cfg)
         self.assertIn("Find-PythonExeUnder", cfg)
-        self.assertIn("LOCALAPPDATA", cfg)
         # 3010 (reboot-requested) is treated as success.
         self.assertIn("3010", cfg)
-        # Honors a private TargetDir.
-        self.assertIn("TargetDir=$TargetDir", cfg)
+
+    def test_private_python_installer_args(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        for token in (
+            "TargetDir=$TargetDir",
+            "Include_exe=1",
+            "Include_lib=1",
+            "Include_pip=1",
+            "Include_tcltk=1",
+            "PrependPath=0",
+            "InstallAllUsers=0",
+            "/log",
+        ):
+            self.assertIn(token, cfg, msg=token)
+        # Args must be built as an array, not an interpolated string.
+        self.assertIn("$pyArgs = @(", cfg)
+
+    def test_private_python_no_silent_switch_to_per_user(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # Per-user location is referenced only for diagnostics, never used as success.
+        self.assertIn("LOCALAPPDATA", cfg)
+        self.assertIn("DIAGNOSTIC", cfg)
+        # The private search is scoped to the runtime root, not the per-user dir.
+        self.assertIn("Find-PythonExeUnder -Root $RuntimeRoot", cfg)
+        # Full end-to-end validation of the private interpreter.
+        self.assertIn("import sys, pip, tkinter", cfg)
+        self.assertIn("python-installer.log", cfg)
 
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
