@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 PYTHON_VERSION = "3.11.9"
-PBS_TAG = "20240415"
+PYTHON_MIN_VERSION = (3, 10)
+INSTALLER_VERSION = "3"
 STAMP_VERSION = "2"
 
 # Pinned third-party Windows runtimes (keep in sync with installers/windows/setup.ps1)
@@ -36,7 +37,51 @@ INSTALLERS_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = INSTALLERS_DIR.parent
 RUNTIME_DIR = INSTALLERS_DIR / "runtime"
 STAMP_FILE = RUNTIME_DIR / ".install_ok"
+INSTALL_STATE_FILE = RUNTIME_DIR / "windows" / "install_state.json"
 REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
+
+# install_state.json field names (keep in sync with installers/windows/installer_config.ps1)
+STATE_INSTALLER_VERSION = "installer_version"
+STATE_INSTALL_TIMESTAMP = "install_timestamp"
+STATE_PYTHON_MODE = "python_mode"
+STATE_PYTHON_PATH = "python_path"
+STATE_PYTHON_SCRIPTS_PATH = "python_scripts_path"
+STATE_VENV_PATH = "venv_path"
+STATE_PACKAGES_INSTALLED = "packages_installed"
+STATE_TESSERACT_MODE = "tesseract_mode"
+STATE_TESSERACT_PATH = "tesseract_path"
+STATE_POPPLER_MODE = "poppler_mode"
+STATE_POPPLER_BIN = "poppler_bin"
+STATE_PATH_POLICY = "path_policy"
+STATE_USER_PATH_MODIFIED = "user_path_modified"
+STATE_USER_PATH_ENTRIES = "user_path_entries_added"
+STATE_PRIVATE_PYTHON_DIR = "private_python_dir"
+STATE_PRIVATE_TESSERACT_DIR = "private_tesseract_dir"
+STATE_PRIVATE_POPPLER_DIR = "private_poppler_dir"
+STATE_RUNTIME_ROOT = "runtime_root"
+STATE_OCR_CAPABILITY = "ocr_capability"
+STATE_GUI_CAN_LAUNCH = "gui_can_launch"
+STATE_TEXT_SEARCH_AVAILABLE = "text_search_available"
+
+PATH_POLICY_PROCESS_LOCAL = "process_local"
+PATH_POLICY_USER_TOOLS = "user_tools"
+PATH_POLICY_USER_TOOLS_PYTHON = "user_tools_python"
+
+PYTHON_MODE_SYSTEM = "system"
+PYTHON_MODE_PRIVATE = "private"
+PYTHON_MODE_CUSTOM = "custom"
+PYTHON_MODE_VENV = "venv"
+
+TOOL_MODE_DETECTED = "detected"
+TOOL_MODE_PRIVATE = "private"
+TOOL_MODE_CUSTOM = "custom"
+TOOL_MODE_SKIP = "skip"
+
+PBS_TAG = "20240415"
+
+
+def windows_runtime_root() -> Path:
+    return RUNTIME_DIR / "windows"
 
 
 def platform_key() -> str:
@@ -58,8 +103,99 @@ def machine_key() -> str:
     raise RuntimeError(f"Unsupported CPU architecture: {platform.machine()}")
 
 
-def windows_runtime_root() -> Path:
-    return RUNTIME_DIR / "windows"
+def windows_install_state_path() -> Path:
+    return INSTALL_STATE_FILE
+
+
+def load_install_state() -> dict | None:
+    """Load Windows install_state.json; return None if missing or invalid."""
+    path = windows_install_state_path()
+    if not path.is_file():
+        return None
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def default_private_venv_dir() -> Path:
+    return windows_runtime_root() / "venv"
+
+
+def resolve_python_exe_from_state(state: dict | None = None) -> Path | None:
+    """Return configured Python executable from install state."""
+    state = state if state is not None else load_install_state()
+    if not state:
+        legacy = runtime_python_exe("windows")
+        return legacy if legacy.is_file() else None
+    raw = state.get(STATE_PYTHON_PATH) or ""
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_file() else None
+
+
+def resolve_tesseract_exe_from_state(state: dict | None = None) -> Path | None:
+    state = state if state is not None else load_install_state()
+    if state and state.get(STATE_TESSERACT_MODE) == TOOL_MODE_SKIP:
+        return None
+    raw = (state or {}).get(STATE_TESSERACT_PATH) or ""
+    if raw:
+        path = Path(raw)
+        if path.is_file():
+            return path
+    legacy = windows_tesseract_exe()
+    return legacy if legacy.is_file() else None
+
+
+def resolve_poppler_bin_from_state(state: dict | None = None) -> Path | None:
+    state = state if state is not None else load_install_state()
+    if state and state.get(STATE_POPPLER_MODE) == TOOL_MODE_SKIP:
+        return None
+    raw = (state or {}).get(STATE_POPPLER_BIN) or ""
+    if raw:
+        path = Path(raw)
+        if path.is_dir():
+            return path
+    legacy = windows_poppler_bin()
+    return legacy if legacy.is_dir() else None
+
+
+def process_path_parts_from_state(state: dict | None, py: Path) -> list[str]:
+    """Build process-local PATH prepend list from install state."""
+    state = state or {}
+    parts: list[str] = []
+    py_dir = py.parent
+    scripts = state.get(STATE_PYTHON_SCRIPTS_PATH) or str(py_dir / "Scripts")
+    venv = state.get(STATE_VENV_PATH) or ""
+    if venv:
+        vpath = Path(venv)
+        if (vpath / "Scripts").is_dir():
+            parts.extend([str(vpath / "Scripts"), str(vpath)])
+        elif vpath.is_dir():
+            parts.append(str(vpath))
+    parts.extend([str(py_dir), scripts])
+
+    tess_raw = state.get(STATE_TESSERACT_PATH) or ""
+    if tess_raw and state.get(STATE_TESSERACT_MODE) != TOOL_MODE_SKIP:
+        parts.append(str(Path(tess_raw).parent))
+
+    pop_raw = state.get(STATE_POPPLER_BIN) or ""
+    if pop_raw and state.get(STATE_POPPLER_MODE) != TOOL_MODE_SKIP:
+        parts.append(str(Path(pop_raw)))
+
+    # De-duplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in parts:
+        norm = str(Path(item))
+        if norm not in seen:
+            seen.add(norm)
+            unique.append(norm)
+    return unique
 
 
 def windows_install_log() -> Path:

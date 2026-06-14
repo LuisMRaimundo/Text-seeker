@@ -5,8 +5,8 @@ echo.
 echo  OPTIONAL: add private text-seeker tools to your USER PATH
 echo  ========================================================
 echo.
-echo  This is NOT required for normal use. Install and Run.bat
-echo  prepends private paths when launching the app.
+echo  The installer wizard already offers PATH choices.
+echo  This helper is NOT required and does NOT run automatically.
 echo.
 echo  Only continue if you want tesseract/pdftotext available
 echo  in new Command Prompt windows without the launcher.
