@@ -12,10 +12,20 @@ STAMP_VERSION = "2"
 
 # Pinned third-party Windows runtimes (keep in sync with installers/windows/setup.ps1)
 WINDOWS_TESSERACT_VERSION = "5.4.0.20240606"
-WINDOWS_TESSERACT_INSTALLER = (
-    "https://digi.bib.uni-mannheim.de/tesseract/"
-    f"tesseract-ocr-w64-setup-{WINDOWS_TESSERACT_VERSION}.exe"
+_TESSERACT_SETUP_NAME = f"tesseract-ocr-w64-setup-{WINDOWS_TESSERACT_VERSION}.exe"
+# Primary: GitHub release asset (Mannheim direct URL often returns HTTP 403).
+WINDOWS_TESSERACT_INSTALLER_URLS: tuple[str, ...] = (
+    (
+        "https://github.com/UB-Mannheim/tesseract/releases/download/"
+        f"v{WINDOWS_TESSERACT_VERSION}/{_TESSERACT_SETUP_NAME}"
+    ),
+    (
+        "https://digi.bib.uni-mannheim.de/tesseract/"
+        f"{_TESSERACT_SETUP_NAME}"
+    ),
 )
+# Back-compat alias — first (preferred) URL.
+WINDOWS_TESSERACT_INSTALLER = WINDOWS_TESSERACT_INSTALLER_URLS[0]
 WINDOWS_POPPLER_VERSION = "24.08.0-0"
 WINDOWS_POPPLER_ZIP = (
     "https://github.com/oschwartz10612/poppler-windows/releases/download/"
@@ -92,6 +102,11 @@ def assert_official_windows_python_installer_url(url: str) -> None:
             )
     if not lower.endswith("-amd64.exe"):
         raise ValueError(f"Windows Python URL must be official amd64 .exe installer: {url!r}")
+
+
+def windows_tesseract_installer_urls() -> tuple[str, ...]:
+    """Return Tesseract installer URLs in try order (GitHub first, Mannheim fallback)."""
+    return WINDOWS_TESSERACT_INSTALLER_URLS
 
 
 def windows_tesseract_dir() -> Path:
