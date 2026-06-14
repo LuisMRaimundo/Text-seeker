@@ -1,31 +1,142 @@
-"""Installer policy tests — Windows private runtime must not use embeddable Python."""
+"""Installer policy tests — Windows explicit installer with user choices."""
 
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP_PS1 = ROOT / "installers" / "windows" / "setup.ps1"
+COMMON = ROOT / "installers" / "common"
+WINDOWS = ROOT / "installers" / "windows"
+SETUP_PS1 = WINDOWS / "setup.ps1"
+INSTALLER_CONFIG = WINDOWS / "installer_config.ps1"
+INSTALLER_UI = WINDOWS / "installer_ui.ps1"
+INSTALL_BAT = WINDOWS / "Install and Run.bat"
+ADD_PATH_BAT = WINDOWS / "Add-Tools-To-User-Path.bat"
 
 
 class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
-    def test_setup_ps1_does_not_reference_embed_zip(self):
-        text = SETUP_PS1.read_text(encoding="utf-8")
-        lower = text.lower()
-        self.assertIn("python-$pythonversion-amd64.exe".lower(), lower)
-        self.assertNotIn("embed-amd64.zip", lower)
-        self.assertNotIn("bootstrap.pypa.io/get-pip", lower)
-        self.assertNotIn("python-embed.zip", lower)
-        self.assertNotIn("set-content -path $_.fullname -value ($lines -join", lower)
-        self.assertIn("Include_tcltk=1", text)
-        self.assertIn("Assert-OfficialPythonInstallerUrl", text)
-        self.assertIn("Remove-LegacyEmbedRuntime", text)
+    def test_setup_launches_explicit_installer_ui(self):
+        text = SETUP_PS1.read_text(encoding="utf-8").lower()
+        self.assertIn("installer_ui.ps1", text)
+        self.assertNotIn("embed-amd64.zip", text)
+        self.assertNotIn("get-pip.py", text)
+        self.assertNotIn("python*._pth", text)
 
-    def test_config_official_python_url_only(self):
-        import sys
+    def test_installer_exposes_python_tesseract_poppler_path_choices(self):
+        ui = INSTALLER_UI.read_text(encoding="utf-8").lower()
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        for needle in (
+            "pythonmode",
+            "tesseractmode",
+            "popplermode",
+            "pathpolicy",
+            "process_local",
+            "skip",
+            "private",
+            "detected",
+            "custom",
+        ):
+            self.assertIn(needle, ui + cfg, msg=needle)
+        self.assertIn("get-detectedpythoninstallations", cfg)
+        self.assertIn("install_state.json", cfg)
 
-        sys.path.insert(0, str(ROOT / "installers" / "common"))
+    def test_forbidden_embed_python_runtime(self):
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        self.assertIn("embed-amd64", cfg)
+        self.assertIn("get-pip.py", cfg)
+        self.assertIn("remove-legacyembedruntime", cfg)
+        self.assertNotIn("embed-amd64.zip", cfg)
+
+    def test_tesseract_fallback_urls_not_mannheim_only(self):
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        self.assertIn("tesseractinstallerurls", cfg)
+        self.assertIn("invoke-downloadwithfallback", cfg)
+        self.assertIn("github.com/ub-mannheim/tesseract", cfg)
+        sys.path.insert(0, str(COMMON))
+        from config import windows_tesseract_installer_urls  # noqa: E402
+
+        urls = windows_tesseract_installer_urls()
+        self.assertGreaterEqual(len(urls), 2)
+
+    def test_tesseract_poppler_warning_only_python_hard_fail(self):
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8")
+        lower = cfg.lower()
+        self.assertIn("tesseract unavailable; ocr for scanned images may not work.", lower)
+        self.assertIn("poppler unavailable; scanned-pdf conversion may not work.", lower)
+        self.assertIn("throw", cfg[cfg.lower().find("install-privatepythonto") :])
+        self.assertIn("throw", cfg[cfg.lower().find("install-pythonpackagesto") :])
+
+    def test_default_path_policy_process_local_only(self):
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        ui = INSTALLER_UI.read_text(encoding="utf-8").lower()
+        self.assertIn("pathpolicy = 'process_local'", cfg)
+        self.assertIn("process-local path only", ui)
+        install = INSTALL_BAT.read_text(encoding="utf-8").lower()
+        self.assertNotIn("setenvironmentvariable", install)
+        self.assertNotIn("add-tools-to-user-path", install)
+
+    def test_user_path_modification_opt_in_only(self):
+        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        self.assertIn("apply-userpathpolicy", cfg)
+        self.assertIn("user_path_modified", cfg)
+        add = ADD_PATH_BAT.read_text(encoding="utf-8").lower()
+        self.assertIn("optional", add)
+        self.assertIn("pause", add)
+
+    def test_install_state_json_semantics_in_config(self):
+        sys.path.insert(0, str(COMMON))
+        from config import (  # noqa: E402
+            INSTALL_STATE_FILE,
+            STATE_OCR_CAPABILITY,
+            STATE_PATH_POLICY,
+            STATE_PYTHON_MODE,
+            load_install_state,
+            ocr_tools_stamp,
+        )
+
+        self.assertTrue(str(INSTALL_STATE_FILE).endswith("install_state.json"))
+        self.assertEqual(ocr_tools_stamp(tesseract_ok=True, poppler_ok=True), "ok")
+        self.assertEqual(ocr_tools_stamp(tesseract_ok=False, poppler_ok=False), "missing")
+        self.assertIsNone(load_install_state())
+        self.assertEqual(STATE_PYTHON_MODE, "python_mode")
+        self.assertEqual(STATE_PATH_POLICY, "path_policy")
+        self.assertEqual(STATE_OCR_CAPABILITY, "ocr_capability")
+
+    def test_process_local_path_from_state(self):
+        sys.path.insert(0, str(COMMON))
+        from config import process_path_parts_from_state  # noqa: E402
+
+        py = ROOT / "installers" / "runtime" / "windows" / "python" / "python.exe"
+        state = {
+            "python_scripts_path": str(py.parent / "Scripts"),
+            "venv_path": "",
+            "tesseract_path": str(ROOT / "installers" / "runtime" / "windows" / "tesseract" / "tesseract.exe"),
+            "poppler_bin": str(ROOT / "installers" / "runtime" / "windows" / "poppler" / "bin"),
+            "tesseract_mode": "private",
+            "poppler_mode": "private",
+        }
+        parts = process_path_parts_from_state(state, py)
+        joined = ";".join(parts).lower()
+        self.assertIn("python", joined)
+        self.assertIn("scripts", joined)
+        self.assertIn("tesseract", joined)
+        self.assertIn("poppler", joined)
+
+    def test_doctor_and_launch_use_install_state(self):
+        bootstrap = (COMMON / "bootstrap.py").read_text(encoding="utf-8")
+        self.assertIn("load_install_state", bootstrap)
+        self.assertIn("process_path_parts_from_state", bootstrap)
+        self.assertIn("GUI can launch", bootstrap)
+        self.assertIn("OCR capability", bootstrap)
+        self.assertIn("Text search available", bootstrap)
+        launch = bootstrap[bootstrap.index("def launch_gui") : bootstrap.index("def _doctor_line")]
+        self.assertNotIn("raise RuntimeError", launch)
+        self.assertIn("WARNING: Tesseract unavailable", launch)
+
+    def test_official_python_installer_only(self):
+        sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402
             assert_official_windows_python_installer_url,
             windows_python_installer_url,
@@ -34,45 +145,6 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         url = windows_python_installer_url()
         assert_official_windows_python_installer_url(url)
         self.assertTrue(url.endswith("-amd64.exe"))
-        self.assertNotIn("embed", url.lower())
-
-    def test_tesseract_uses_fallback_urls_not_mannheim_only(self):
-        text = SETUP_PS1.read_text(encoding="utf-8")
-        lower = text.lower()
-        self.assertIn("$tesseractinstallerurls", lower)
-        self.assertIn("invoke-downloadwithfallback", lower)
-        self.assertIn("github.com/ub-mannheim/tesseract/releases/download/", lower)
-        self.assertIn("digi.bib.uni-mannheim.de/tesseract/", lower)
-        self.assertNotIn("$tesseractinstallerurl =", lower)
-
-        import sys
-
-        sys.path.insert(0, str(ROOT / "installers" / "common"))
-        from config import windows_tesseract_installer_urls  # noqa: E402
-
-        urls = windows_tesseract_installer_urls()
-        self.assertGreaterEqual(len(urls), 2)
-        self.assertTrue(urls[0].startswith("https://github.com/UB-Mannheim/tesseract/"))
-        self.assertIn("digi.bib.uni-mannheim.de", urls[1])
-
-    def test_tesseract_and_poppler_failures_are_warning_only(self):
-        text = SETUP_PS1.read_text(encoding="utf-8")
-        lower = text.lower()
-        self.assertIn(
-            "tesseract download failed; ocr for scanned images may be unavailable",
-            lower,
-        )
-        self.assertIn("invoke-downloadoptional", lower)
-        self.assertIn("poppler download failed", lower)
-        # Python/Tkinter remain hard-fail.
-        self.assertIn("throw", text[text.lower().find("function test-pythontkinter") :])
-        self.assertIn("throw", text[text.lower().find("function install-privatepython") :])
-
-    def test_python_tkinter_remains_hard_fail(self):
-        text = SETUP_PS1.read_text(encoding="utf-8")
-        tk_section = text[text.index("function Test-PythonTkinter") : text.index("function Install-PythonPackages")]
-        self.assertIn("throw", tk_section)
-        self.assertIn("Tkinter is not available", tk_section)
 
 
 if __name__ == "__main__":

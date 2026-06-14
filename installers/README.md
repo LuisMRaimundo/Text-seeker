@@ -29,8 +29,8 @@ The app runs without either tool for normal text-based PDFs, DOCX, HTML, TXT, Ex
 
    **`installers\windows\Install and Run.bat`**
 
-3. Wait for the first-time setup (several minutes).
-4. The **text-seeker** window opens. Keep the console window open while you use the app.
+3. Use the **installer wizard** to choose Python, OCR tools, and PATH handling.
+4. The **text-seeker** window opens after a successful install.
 
 To stop: close the search window, then close the console or press **Ctrl+C**.
 
