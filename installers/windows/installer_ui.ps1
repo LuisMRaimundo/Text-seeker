@@ -222,11 +222,30 @@ function Show-WinFormsInstallerWizard {
                 }
                 $panel.Controls.Add($script:lstPython)
                 $y += 110
-                Add-Label 'Custom python.exe (or its folder):' 10 $y 240 20; $y += 22
+                Add-Label 'Custom python.exe (or its folder) - select "Use custom python.exe path" first:' 10 $y 540 20; $y += 22
                 $customDefault = ''
-                if ($choices.PythonMode -eq 'custom') { $customDefault = $choices.PythonPath }
-                elseif ($choices.PythonMode -eq 'system') { $customDefault = $choices.PythonPath }
-                $script:txtCustomPy = Add-TextBox $customDefault 10 $y 560; $y += 35
+                if ($choices.PythonMode -eq 'custom' -or $choices.PythonMode -eq 'system') {
+                    # Only prefill if it is a real file/folder, never a placeholder like C:\Python.
+                    if ($choices.PythonPath -and (Test-Path -LiteralPath $choices.PythonPath)) {
+                        $customDefault = $choices.PythonPath
+                    }
+                }
+                $script:txtCustomPy = Add-TextBox $customDefault 10 $y 460
+                $btnBrowsePy = New-Object System.Windows.Forms.Button
+                $btnBrowsePy.Text = 'Browse...'
+                $btnBrowsePy.Location = New-Object System.Drawing.Point(480, $y)
+                $btnBrowsePy.Size = New-Object System.Drawing.Size(90, 22)
+                $btnBrowsePy.Add_Click({
+                    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+                    $dlg.Title = 'Select python.exe'
+                    $dlg.Filter = 'Python (python.exe)|python.exe|All files (*.*)|*.*'
+                    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                        $script:txtCustomPy.Text = $dlg.FileName
+                        $script:rbCustom.Checked = $true
+                    }
+                })
+                $panel.Controls.Add($btnBrowsePy)
+                $y += 35
                 Add-Label 'Private Python folder:' 10 $y 160 20; $y += 22
                 $script:txtPrivatePyDir = Add-TextBox $choices.PrivatePythonDir 170 $y 400
             }
