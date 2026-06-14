@@ -9,7 +9,10 @@ $PythonVersion = '3.11.9'
 $TesseractVersion = '5.4.0.20240606'
 $PopplerVersion = '24.08.0-0'
 $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
-$TesseractInstallerUrl = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TesseractVersion.exe"
+$TesseractInstallerUrls = @(
+    "https://github.com/UB-Mannheim/tesseract/releases/download/v$TesseractVersion/tesseract-ocr-w64-setup-$TesseractVersion.exe"
+    "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TesseractVersion.exe"
+)
 $PopplerZipUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v$PopplerVersion/Release-$PopplerVersion.zip"
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -90,7 +93,38 @@ function Write-InstallStamp {
 function Invoke-Download {
     param([string]$Url, [string]$Dest)
     Write-InstallLog "Downloading: $Url"
-    Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
+    Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+}
+
+function Invoke-DownloadWithFallback {
+    param([string[]]$Urls, [string]$Dest)
+    $lastError = $null
+    foreach ($Url in $Urls) {
+        try {
+            Write-InstallLog "Trying download: $Url"
+            Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+            Write-InstallLog "Download succeeded: $Url"
+            return $true
+        } catch {
+            $lastError = $_.Exception.Message
+            Write-InstallLog "Download failed ($Url): $lastError" 'WARN'
+        }
+    }
+    if ($lastError) {
+        Write-InstallLog "All download URLs failed. Last error: $lastError" 'WARN'
+    }
+    return $false
+}
+
+function Invoke-DownloadOptional {
+    param([string]$Url, [string]$Dest, [string]$ToolName)
+    try {
+        Invoke-Download -Url $Url -Dest $Dest
+        return $true
+    } catch {
+        Write-InstallLog "Download failed ($Url): $($_.Exception.Message)" 'WARN'
+        return $false
+    }
 }
 
 function Assert-OfficialPythonInstallerUrl {
@@ -195,7 +229,16 @@ function Install-Tesseract {
     Write-InstallLog "Installing private Tesseract OCR $TesseractVersion (UB Mannheim build)..."
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
     $tessInstaller = Join-Path $Temp 'tesseract-setup.exe'
-    Invoke-Download -Url $TesseractInstallerUrl -Dest $tessInstaller
+
+    $downloaded = Invoke-DownloadWithFallback -Urls $TesseractInstallerUrls -Dest $tessInstaller
+    if (-not $downloaded) {
+        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
+        Write-Host ''
+        Write-Host 'WARNING: Tesseract download failed (403/404/timeout on all mirrors).' -ForegroundColor Yellow
+        Write-Host 'Text search and GUI still work; OCR/scanned PDF features are disabled.' -ForegroundColor Yellow
+        $script:TesseractOk = $false
+        return
+    }
 
     if (Test-Path -LiteralPath $TesseractDir) {
         Remove-Item -LiteralPath $TesseractDir -Recurse -Force
@@ -210,9 +253,16 @@ function Install-Tesseract {
         "/DIR=$TesseractDir"
     )
     Write-InstallLog ("Running Tesseract installer -> " + $TesseractDir)
-    $proc = Start-Process -FilePath $tessInstaller -ArgumentList $tessArgs -Wait -PassThru
-    if ($proc.ExitCode -ne 0) {
-        Write-InstallLog "Tesseract installer exit code $($proc.ExitCode)" 'WARN'
+    try {
+        $proc = Start-Process -FilePath $tessInstaller -ArgumentList $tessArgs -Wait -PassThru
+        if ($proc.ExitCode -ne 0) {
+            Write-InstallLog "Tesseract installer exit code $($proc.ExitCode)" 'WARN'
+        }
+    } catch {
+        Write-InstallLog "Tesseract installer failed: $($_.Exception.Message)" 'WARN'
+        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
+        $script:TesseractOk = $false
+        return
     }
 
     if (-not (Test-Path -LiteralPath $TesseractExe)) {
@@ -225,6 +275,7 @@ function Install-Tesseract {
 
     if (-not (Test-Path -LiteralPath $TesseractExe)) {
         Write-InstallLog "Tesseract was not installed; OCR/scanned-PDF features will be unavailable." 'WARN'
+        Write-InstallLog 'Tesseract download failed; OCR for scanned images may be unavailable, but text search and GUI can still run.' 'WARN'
         $script:TesseractOk = $false
         return
     }
@@ -244,13 +295,29 @@ function Install-Poppler {
     Write-InstallLog "Installing private Poppler $PopplerVersion..."
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
     $zipPath = Join-Path $Temp 'poppler.zip'
-    Invoke-Download -Url $PopplerZipUrl -Dest $zipPath
 
-    if (Test-Path -LiteralPath $PopplerRoot) {
-        Remove-Item -LiteralPath $PopplerRoot -Recurse -Force
+    $downloaded = Invoke-DownloadOptional -Url $PopplerZipUrl -Dest $zipPath -ToolName 'Poppler'
+    if (-not $downloaded) {
+        Write-InstallLog 'Poppler download failed; PDF page rendering for OCR may fail, but text search and GUI can still run.' 'WARN'
+        Write-Host ''
+        Write-Host 'WARNING: Poppler download failed.' -ForegroundColor Yellow
+        Write-Host 'Text-based PDF search still works; scanned PDF OCR may fail.' -ForegroundColor Yellow
+        $script:PopplerOk = $false
+        return
     }
-    New-Item -ItemType Directory -Force -Path $PopplerRoot | Out-Null
-    Expand-Archive -LiteralPath $zipPath -DestinationPath $PopplerRoot -Force
+
+    try {
+        if (Test-Path -LiteralPath $PopplerRoot) {
+            Remove-Item -LiteralPath $PopplerRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $PopplerRoot | Out-Null
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $PopplerRoot -Force
+    } catch {
+        Write-InstallLog "Poppler extract failed: $($_.Exception.Message)" 'WARN'
+        Write-InstallLog 'Poppler download failed; PDF page rendering for OCR may fail, but text search and GUI can still run.' 'WARN'
+        $script:PopplerOk = $false
+        return
+    }
 
     $foundPdftotext = Get-ChildItem -Path $PopplerRoot -Filter 'pdftotext.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $foundPdftotext) {

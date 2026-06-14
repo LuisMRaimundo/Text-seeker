@@ -231,10 +231,12 @@ def launch_gui(py: Path) -> int:
         return 1
 
 
-def _doctor_line(label: str, value: str, *, ok: bool | None = None) -> None:
+def _doctor_line(label: str, value: str, *, ok: bool | None = None, warn: bool = False) -> None:
     suffix = ""
     if ok is True:
         suffix = " [OK]"
+    elif warn:
+        suffix = " [WARNING]"
     elif ok is False:
         suffix = " [MISSING]"
     line = f"{label}: {value}{suffix}"
@@ -299,7 +301,13 @@ def cmd_doctor(_: argparse.Namespace) -> int:
         env = windows_process_env(py) if py_found else os.environ.copy()
         tess_exe = windows_tesseract_exe()
         tess_ok = tess_exe.is_file()
-        _doctor_line("Tesseract executable", str(tess_exe), ok=tess_ok)
+        tess_warn = bool(py_found and not tess_ok)
+        _doctor_line(
+            "Tesseract executable",
+            str(tess_exe),
+            ok=True if tess_ok else (False if not py_found else None),
+            warn=tess_warn,
+        )
         if tess_ok:
             code, out = _run_capture([str(tess_exe), "--version"], env=env)
             _doctor_line("Tesseract version", out.splitlines()[0] if out else f"exit {code}", ok=code == 0)
@@ -307,8 +315,14 @@ def cmd_doctor(_: argparse.Namespace) -> int:
         pop_bin = windows_poppler_bin()
         pdftotext = pop_bin / "pdftotext.exe"
         pop_ok = pdftotext.is_file()
-        _doctor_line("Poppler bin", str(pop_bin), ok=pop_bin.is_dir())
-        _doctor_line("pdftotext", str(pdftotext), ok=pop_ok)
+        pop_warn = bool(py_found and not pop_ok)
+        _doctor_line("Poppler bin", str(pop_bin), ok=True if pop_ok else (False if not py_found else None), warn=pop_warn)
+        _doctor_line(
+            "pdftotext",
+            str(pdftotext),
+            ok=True if pop_ok else (False if not py_found else None),
+            warn=pop_warn,
+        )
         if pop_ok:
             code, out = _run_capture([str(pdftotext), "-v"], env=env)
             _doctor_line("pdftotext version", out.splitlines()[0] if out else f"exit {code}", ok=code == 0)
@@ -317,15 +331,23 @@ def cmd_doctor(_: argparse.Namespace) -> int:
                 code, out = _run_capture([str(pdftoppm), "-v"], env=env)
                 _doctor_line("pdftoppm version", out.splitlines()[0] if out else f"exit {code}", ok=code == 0)
             else:
-                _doctor_line("pdftoppm", str(pdftoppm), ok=False)
+                _doctor_line("pdftoppm", str(pdftoppm), warn=bool(py_found))
 
         ocr_cap = tess_ok
         pdf_ocr_cap = tess_ok and pop_ok
-        _doctor_line("OCR capability", "available" if ocr_cap else "unavailable", ok=ocr_cap)
+        ocr_warn = bool(py_found and not ocr_cap)
+        pdf_ocr_warn = bool(py_found and not pdf_ocr_cap)
+        _doctor_line(
+            "OCR capability",
+            "available" if ocr_cap else "unavailable (Tesseract missing)",
+            ok=True if ocr_cap else (False if not py_found else None),
+            warn=ocr_warn,
+        )
         _doctor_line(
             "Scanned PDF OCR capability",
-            "available" if pdf_ocr_cap else "unavailable",
-            ok=pdf_ocr_cap,
+            "available" if pdf_ocr_cap else "unavailable (Tesseract and/or Poppler missing)",
+            ok=True if pdf_ocr_cap else (False if not py_found else None),
+            warn=pdf_ocr_warn,
         )
         _doctor_line("Install log", str(windows_install_log()), ok=windows_install_log().is_file())
 

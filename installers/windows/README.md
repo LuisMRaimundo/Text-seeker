@@ -19,6 +19,8 @@
 | Poppler utilities | `installers\runtime\windows\poppler\bin\` |
 | Python packages | private pip into the runtime above |
 
+Tesseract is downloaded from the **UB-Mannheim GitHub release** first; the Mannheim university mirror is tried as fallback. If all mirrors fail (403/404/timeout), setup **continues** with a warning — text search and the GUI still work; only OCR/scanned-PDF features are disabled.
+
 The launcher prepends these folders to **process PATH** when starting the app.
 
 **Supported:** Windows 10/11 **x64 only** (ARM64 is rejected with a clear message).
