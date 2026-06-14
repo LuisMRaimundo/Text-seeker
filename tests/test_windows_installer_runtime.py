@@ -9,24 +9,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMMON = ROOT / "installers" / "common"
 WINDOWS = ROOT / "installers" / "windows"
-SETUP_PS1 = WINDOWS / "setup.ps1"
-INSTALLER_CONFIG = WINDOWS / "installer_config.ps1"
-INSTALLER_UI = WINDOWS / "installer_ui.ps1"
+SETUP_UI = WINDOWS / "installer_ui.ps1"
 INSTALL_BAT = WINDOWS / "Install and Run.bat"
-ADD_PATH_BAT = WINDOWS / "Add-Tools-To-User-Path.bat"
 
 
 class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
-    def test_setup_launches_explicit_installer_ui(self):
-        text = SETUP_PS1.read_text(encoding="utf-8").lower()
-        self.assertIn("installer_ui.ps1", text)
-        self.assertNotIn("embed-amd64.zip", text)
-        self.assertNotIn("get-pip.py", text)
-        self.assertNotIn("python*._pth", text)
+    def test_launcher_runs_explicit_installer_ui(self):
+        install = INSTALL_BAT.read_text(encoding="utf-8").lower()
+        ui = SETUP_UI.read_text(encoding="utf-8").lower()
+        self.assertIn("installer_ui.ps1", install)
+        self.assertNotIn("setup.ps1", install)
+        self.assertNotIn("embed-amd64.zip", ui)
+        self.assertNotIn("get-pip.py", ui)
 
     def test_installer_exposes_python_tesseract_poppler_path_choices(self):
-        ui = INSTALLER_UI.read_text(encoding="utf-8").lower()
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        ui = SETUP_UI.read_text(encoding="utf-8").lower()
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
         for needle in (
             "pythonmode",
             "tesseractmode",
@@ -43,14 +41,14 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertIn("install_state.json", cfg)
 
     def test_forbidden_embed_python_runtime(self):
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
         self.assertIn("embed-amd64", cfg)
         self.assertIn("get-pip.py", cfg)
         self.assertIn("remove-legacyembedruntime", cfg)
         self.assertNotIn("embed-amd64.zip", cfg)
 
     def test_tesseract_fallback_urls_not_mannheim_only(self):
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
         self.assertIn("tesseractinstallerurls", cfg)
         self.assertIn("invoke-downloadwithfallback", cfg)
         self.assertIn("github.com/ub-mannheim/tesseract", cfg)
@@ -61,7 +59,7 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertGreaterEqual(len(urls), 2)
 
     def test_tesseract_poppler_warning_only_python_hard_fail(self):
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8")
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         lower = cfg.lower()
         self.assertIn("tesseract unavailable; ocr for scanned images may not work.", lower)
         self.assertIn("poppler unavailable; scanned-pdf conversion may not work.", lower)
@@ -69,21 +67,21 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertIn("throw", cfg[cfg.lower().find("install-pythonpackagesto") :])
 
     def test_default_path_policy_process_local_only(self):
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
-        ui = INSTALLER_UI.read_text(encoding="utf-8").lower()
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
+        ui = SETUP_UI.read_text(encoding="utf-8").lower()
         self.assertIn("pathpolicy = 'process_local'", cfg)
         self.assertIn("process-local path only", ui)
         install = INSTALL_BAT.read_text(encoding="utf-8").lower()
         self.assertNotIn("setenvironmentvariable", install)
         self.assertNotIn("add-tools-to-user-path", install)
 
-    def test_user_path_modification_opt_in_only(self):
-        cfg = INSTALLER_CONFIG.read_text(encoding="utf-8").lower()
+    def test_user_path_modification_opt_in_via_installer_only(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
         self.assertIn("apply-userpathpolicy", cfg)
         self.assertIn("user_path_modified", cfg)
-        add = ADD_PATH_BAT.read_text(encoding="utf-8").lower()
-        self.assertIn("optional", add)
-        self.assertIn("pause", add)
+        self.assertFalse((WINDOWS / "Add-Tools-To-User-Path.bat").exists())
+        self.assertFalse((WINDOWS / "START-HERE.bat").exists())
+        self.assertFalse((WINDOWS / "setup.ps1").exists())
 
     def test_install_state_json_semantics_in_config(self):
         sys.path.insert(0, str(COMMON))

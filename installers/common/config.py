@@ -11,7 +11,7 @@ PYTHON_MIN_VERSION = (3, 10)
 INSTALLER_VERSION = "3"
 STAMP_VERSION = "2"
 
-# Pinned third-party Windows runtimes (keep in sync with installers/windows/setup.ps1)
+# Pinned third-party Windows runtimes (keep in sync with installers/windows/installer_config.ps1)
 WINDOWS_TESSERACT_VERSION = "5.4.0.20240606"
 _TESSERACT_SETUP_NAME = f"tesseract-ocr-w64-setup-{WINDOWS_TESSERACT_VERSION}.exe"
 # Primary: GitHub release asset (Mannheim direct URL often returns HTTP 403).

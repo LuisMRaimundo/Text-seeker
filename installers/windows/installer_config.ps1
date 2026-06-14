@@ -1,4 +1,4 @@
-# Shared Windows installer logic for text-seeker (dot-source from setup.ps1 / installer_ui.ps1).
+# Shared Windows installer logic for text-seeker (dot-source from installer_ui.ps1).
 #Requires -Version 5.1
 
 $script:InstallerVersion = '3'
