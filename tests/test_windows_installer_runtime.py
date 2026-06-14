@@ -150,6 +150,18 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         tests_ps1 = WINDOWS / "tests" / "InstallWizard.Tests.ps1"
         self.assertTrue(tests_ps1.is_file())
 
+    def test_installer_ps1_files_are_pure_ascii(self):
+        # Windows PowerShell 5.1 reads BOM-less .ps1 as Windows-1252; non-ASCII
+        # characters (e.g. em-dash) corrupt parsing. Keep installer scripts ASCII.
+        for name in ("installer_ui.ps1", "installer_config.ps1", "installer_wizard_logic.ps1"):
+            data = (WINDOWS / name).read_bytes()
+            non_ascii = [b for b in data if b > 127]
+            self.assertEqual(
+                non_ascii,
+                [],
+                msg=f"{name} contains non-ASCII bytes: {non_ascii[:8]}",
+            )
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402

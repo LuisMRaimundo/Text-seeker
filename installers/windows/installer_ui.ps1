@@ -184,7 +184,7 @@ function Show-WinFormsInstallerWizard {
         $btnNext.Enabled = $nav.NextEnabled
         $btnInstall.Enabled = $nav.InstallEnabled
         if ($nav.StepTitle) {
-            $form.Text = "text-seeker Windows Installer — $($nav.StepTitle) ($($script:WizardStep + 1)/$($maxStep + 1))"
+            $form.Text = "text-seeker Windows Installer - $($nav.StepTitle) ($($script:WizardStep + 1)/$($maxStep + 1))"
         }
     }
 
@@ -242,7 +242,7 @@ function Show-WinFormsInstallerWizard {
             }
             3 {
                 $y = 10
-                Add-Label 'Tesseract OCR (optional — needed for image OCR / scanned PDFs)' 10 $y 560 40 $true
+                Add-Label 'Tesseract OCR (optional - needed for image OCR / scanned PDFs)' 10 $y 560 40 $true
                 $y += 45
                 $script:rbTessPrivate = Add-Radio 'Install private Tesseract' 10 $y ($choices.TesseractMode -eq 'private'); $y += 28
                 $script:rbTessDetected = Add-Radio 'Use Tesseract found in PATH' 10 $y ($choices.TesseractMode -eq 'detected'); $y += 28
@@ -254,7 +254,7 @@ function Show-WinFormsInstallerWizard {
             }
             4 {
                 $y = 10
-                Add-Label 'Poppler (optional — needed for scanned-PDF page rendering)' 10 $y 560 40 $true
+                Add-Label 'Poppler (optional - needed for scanned-PDF page rendering)' 10 $y 560 40 $true
                 $y += 45
                 $script:rbPopPrivate = Add-Radio 'Install private Poppler' 10 $y ($choices.PopplerMode -eq 'private'); $y += 28
                 $script:rbPopDetected = Add-Radio 'Use Poppler found in PATH' 10 $y ($choices.PopplerMode -eq 'detected'); $y += 28
@@ -267,7 +267,7 @@ function Show-WinFormsInstallerWizard {
                 $y = 10
                 Add-Label 'PATH handling' 10 $y 560 24 $true
                 $y += 35
-                $script:rbPathProcess = Add-Radio 'Process-local PATH only (recommended) — Text-seeker works without changing Windows PATH' 10 $y ($choices.PathPolicy -eq 'process_local'); $y += 40
+                $script:rbPathProcess = Add-Radio 'Process-local PATH only (recommended) - Text-seeker works without changing Windows PATH' 10 $y ($choices.PathPolicy -eq 'process_local'); $y += 40
                 $script:rbPathTools = Add-Radio 'Also add Tesseract and Poppler to user PATH (optional)' 10 $y ($choices.PathPolicy -eq 'user_tools'); $y += 28
                 $script:rbPathAll = Add-Radio 'Also add Tesseract, Poppler, and Python Scripts to user PATH (advanced)' 10 $y ($choices.PathPolicy -eq 'user_tools_python'); $y += 40
                 Add-Label 'System PATH is never modified. User PATH changes only if you select an option above.' 10 $y 560 40

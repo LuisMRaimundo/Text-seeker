@@ -78,6 +78,15 @@ Assert-True ($uiText -match '\$script:WizardStep') 'UI uses $script:WizardStep'
 Assert-True ($uiText -match 'Move-InstallerWizardStep') 'UI uses Move-InstallerWizardStep'
 Assert-True ($uiText -notmatch '\$script:step\+\+') 'UI does not use broken $script:step++'
 
+# Guard: installer .ps1 files must be pure ASCII so Windows PowerShell 5.1
+# (which reads BOM-less scripts as Windows-1252) cannot corrupt characters.
+foreach ($psName in @('installer_ui.ps1', 'installer_config.ps1', 'installer_wizard_logic.ps1')) {
+    $psPath = Join-Path $windowsDir $psName
+    $bytes = [System.IO.File]::ReadAllBytes($psPath)
+    $nonAscii = @($bytes | Where-Object { $_ -gt 127 })
+    Assert-Equals 0 $nonAscii.Count "$psName is pure ASCII (no non-ASCII bytes)"
+}
+
 Write-Host ''
 Write-Host "Results: $passed passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
 if ($failed -gt 0) { exit 1 }
