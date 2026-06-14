@@ -1,38 +1,29 @@
 # Autonomous installers (no Python required)
 
-These launchers install a **private copy** of Python and all **text-seeker** libraries on **first run**, then open the desktop search window. You do **not** need Python, pip, or conda installed.
+These launchers set up **text-seeker** and open the desktop search window. You do **not** need Python, pip, or conda installed beforehand (Windows wizard can also use an existing system Python).
 
 **Requirements:** Internet on first run (~300–600 MB download). Disk space ~1 GB after install. Windows 10/11 **x64**, macOS 11+, or recent Linux (x86_64 or arm64).
-
-**Windows private runtime (first run):**
-
-- Python 3.11 with **Tcl/Tk** and pip (official installer, local target — not embed ZIP)
-- Python packages from `requirements.txt`
-- **Tesseract OCR** (UB Mannheim build, pinned version in `installers/common/config.py`)
-- **Poppler** binaries (pinned release zip)
-
-The launcher prepends private tool paths to **process PATH** — it does **not** modify system PATH by default.
-
-**Optional (manual / dev installs):**
-
-- **[Tesseract OCR](https://github.com/tesseract-ocr/tesseract)** — text recognition from images and scanned pages
-- **Poppler** — renders PDF pages for OCR (`pdf2image`); see [README_STARTING.md](../README_STARTING.md)
-
-The app runs without either tool for normal text-based PDFs, DOCX, HTML, TXT, Excel, and CSV.
 
 ---
 
 ## Windows 10 / 11
 
 1. Open the project folder (or your ZIP after unpacking).
-2. Double-click:
-
-   **`installers\windows\Install and Run.bat`**
-
-3. Use the **installer wizard** to choose Python, OCR tools, and PATH handling.
+2. Double-click **`installers\windows\Install and Run.bat`** (or **`INSTALL.bat`** — same launcher).
+3. The **installer wizard** opens on first run. Choose:
+   - **Python** — private official installer (Tcl/Tk + pip), detected system Python (venv for packages), or custom path
+   - **Packages** — `requirements.txt`
+   - **Tesseract** / **Poppler** — install private, use detected, custom path, or skip
+   - **PATH** — process-local only (default) or opt-in user PATH
 4. The **text-seeker** window opens after a successful install.
 
-To stop: close the search window, then close the console or press **Ctrl+C**.
+**Configuration:** `installers\runtime\windows\install_state.json`  
+**Log:** `installers\runtime\windows\install.log`  
+**Details:** [installers/windows/README.md](windows/README.md)
+
+The launcher uses **process-local PATH** by default — it does **not** modify system PATH unless you choose that in the wizard.
+
+**OCR tools:** Tesseract and Poppler are optional. Text search and the GUI work without them; OCR/scanned-PDF features need both (or your own installs pointed to in the wizard).
 
 ---
 
@@ -63,12 +54,17 @@ chmod +x installers/linux/install-and-run.sh installers/linux/setup-runtime.sh
 
 | Location | Contents |
 |----------|----------|
-| `installers/runtime/` | Private Python + pip packages + Windows Tesseract/Poppler (gitignored) |
-| Desktop | **text-seeker** Tkinter GUI |
+| `installers/runtime/` | Private Python, pip packages, Windows Tesseract/Poppler (gitignored) |
+| `installers/runtime/windows/install_state.json` | Windows install choices (gitignored) |
+| GUI | **text-seeker** Tkinter window |
 
-Diagnostics: `python installers/common/bootstrap.py doctor`
+**Diagnostics** (Windows — use Python path from `install_state.json`):
 
-To reinstall: delete `installers/runtime/` and run the launcher again.
+```bat
+installers\runtime\windows\python\python.exe installers\common\bootstrap.py doctor
+```
+
+**Reinstall:** delete `installers/runtime/` and run the launcher again.
 
 ---
 
@@ -76,13 +72,9 @@ To reinstall: delete `installers/runtime/` and run the launcher again.
 
 | Problem | What to try |
 |---------|-------------|
-| Setup failed | Check internet; retry after deleting `installers/runtime/` |
-| GUI does not open | Run `installers\runtime\windows\python\python.exe app.py --gui` from project root (Windows) |
-| OCR missing / no text in scans | Install Tesseract; set `TESSERACT_PATH` if needed — [README_STARTING.md](../README_STARTING.md) |
-| PDF OCR fails, text PDFs OK | Install Poppler and add its `bin` to PATH (or `POPPLER_PATH` on Windows) — [README_STARTING.md](../README_STARTING.md) |
+| Setup failed (Python/packages) | Check `install.log`; Python/tkinter/pip are required on Windows |
+| Tesseract/Poppler failed (Windows) | Warning only — re-run wizard or install tools manually |
+| GUI does not open | Run `doctor`; re-run **Install and Run.bat** |
+| OCR missing | Re-run wizard; install or point to Tesseract + Poppler |
 
-Diagnostics (any Python 3.10+):
-
-```bash
-python installers/common/bootstrap.py doctor
-```
+See also [README_STARTING.md](../README_STARTING.md) for manual Tesseract/Poppler install on dev machines.

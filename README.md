@@ -12,11 +12,11 @@ See **[installers/README.md](installers/README.md)**:
 
 | Platform | Launcher |
 |----------|----------|
-| **Windows 10/11** | Double-click `installers\windows\Install and Run.bat` |
+| **Windows 10/11 (x64)** | `installers\windows\Install and Run.bat` or `INSTALL.bat` — opens an installer wizard on first run |
 | **macOS** | Double-click `installers/macos/Install and Run.command` (after `chmod +x`) |
 | **Linux** | `./installers/linux/install-and-run.sh` |
 
-First run downloads a private Python and libraries (~200–400 MB). No system Python required.
+First run downloads a private runtime and libraries (~200–400 MB). No system Python required on Windows/macOS/Linux installers. On Windows, choices are saved to `installers/runtime/windows/install_state.json`. See [installers/README.md](installers/README.md).
 
 ## Developers (Python already installed)
 
@@ -45,7 +45,7 @@ Continuous integration runs the same test suite on push (see `.github/workflows/
 | `boolean_parser.py`, `nlp_utils.py` | Query parsing, stemming, tokenization |
 | `indexing.py`, `text_extract.py` | Inverted index and full-document extraction |
 | `search_*.py`, `html_search.py`, `text_search.py` | Per-format search |
-| `installers/` | One-click setup (private Python on first run) |
+| `installers/` | One-click setup (Windows wizard + private runtime on first run) |
 | `tests/` | Unit and integration tests |
 
 ## Documentation

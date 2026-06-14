@@ -108,7 +108,13 @@ pip install -r requirements.txt
 
 ## 3.5 One-click install (no system Python)
 
-Use `installers/windows/Install and Run.bat`, `installers/macos/Install and Run.command`, or `installers/linux/install-and-run.sh`. First run downloads a private runtime under `installers/runtime/` (gitignored). Details: [installers/README.md](installers/README.md).
+| Platform | Launcher |
+|----------|----------|
+| Windows x64 | `installers/windows/Install and Run.bat` — wizard for Python, packages, Tesseract, Poppler, PATH; state in `installers/runtime/windows/install_state.json` |
+| macOS | `installers/macos/Install and Run.command` |
+| Linux | `installers/linux/install-and-run.sh` |
+
+First run downloads a private runtime under `installers/runtime/` (gitignored). Windows uses the official Python amd64 installer (Tcl/Tk + pip), not embeddable Python. Details: [installers/README.md](installers/README.md), [installers/windows/README.md](installers/windows/README.md).
 
 ---
 

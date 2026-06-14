@@ -8,9 +8,11 @@ Use the **one-click installer** — see [installers/README.md](installers/README
 
 | Platform | Action |
 |----------|--------|
-| Windows 10/11 | `installers\windows\Install and Run.bat` |
+| Windows 10/11 (x64) | `installers\windows\Install and Run.bat` or `INSTALL.bat` |
 | macOS | `installers/macos/Install and Run.command` |
 | Linux | `./installers/linux/install-and-run.sh` |
+
+On **Windows**, the first run opens an installer wizard where you choose Python, packages, Tesseract, Poppler, and PATH handling. Settings are stored in `installers\runtime\windows\install_state.json`.
 
 ## If Python is already installed
 
@@ -95,7 +97,7 @@ These are **system tools**, not Python packages. **text-seeker works without the
 
 | Platform | Install |
 |----------|---------|
-| **Windows** | [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki) — default path `C:\Program Files\Tesseract-OCR\tesseract.exe` is detected automatically |
+| **Windows** | Use the installer wizard (private download or point to existing), or [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki). The app also checks `TESSERACT_PATH` and common install paths. |
 | **macOS** | `brew install tesseract` |
 | **Linux** | `sudo apt install tesseract-ocr` (Debian/Ubuntu) or your distro equivalent |
 
@@ -109,7 +111,7 @@ Required by `pdf2image` when OCR must render PDF pages to images.
 
 | Platform | Install |
 |----------|---------|
-| **Windows** | [Poppler for Windows](http://blog.alivate.com.au/poppler-windows/) — add the `bin` folder to **PATH**, or set `POPPLER_PATH` to that folder |
+| **Windows** | Installer wizard (private Poppler zip), [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases), or set `POPPLER_PATH` to the `bin` folder |
 | **macOS** | `brew install poppler` |
 | **Linux** | `sudo apt install poppler-utils` |
 
