@@ -134,6 +134,26 @@ $threw = $false
 try { $null = Get-DetectedPythonInstallations } catch { $threw = $true }
 Assert-True (-not $threw) 'Get-DetectedPythonInstallations does not throw under Stop'
 
+# Private-install helpers: locate python.exe (incl. nested) and wait for a file.
+$tmp2 = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-pyfind-" + [System.Guid]::NewGuid().ToString('N'))
+$nested = Join-Path $tmp2 'tools'
+New-Item -ItemType Directory -Force -Path $nested | Out-Null
+$nestedExe = Join-Path $nested 'python.exe'
+Set-Content -LiteralPath $nestedExe -Value '' -Encoding ASCII
+try {
+    Assert-Equals $nestedExe (Find-PythonExeUnder -Root $tmp2) 'Find-PythonExeUnder locates nested python.exe'
+    Assert-True (Wait-ForFile -Path $nestedExe -TimeoutSeconds 2) 'Wait-ForFile returns true for existing file'
+    Assert-True (-not (Wait-ForFile -Path (Join-Path $tmp2 'nope.exe') -TimeoutSeconds 1)) 'Wait-ForFile returns false for missing file'
+} finally {
+    Remove-Item -LiteralPath $tmp2 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Regression: do not use the PowerShell automatic variable $args for installer args.
+$cfgText = Get-Content -LiteralPath (Join-Path $windowsDir 'installer_config.ps1') -Raw
+Assert-True ($cfgText -notmatch '\$args\s*=') 'installer_config.ps1 does not assign to automatic $args'
+Assert-True ($cfgText -match 'Find-PythonExeUnder') 'installer_config.ps1 has python.exe locate fallback'
+Assert-True ($cfgText -match 'LOCALAPPDATA') 'installer_config.ps1 has default per-user location fallback'
+
 # UI must gate Next on the Python step.
 Assert-True ($uiText -match 'Test-CanLeaveCurrentStep') 'UI gates Next with Test-CanLeaveCurrentStep'
 Assert-True ($uiText -match 'Get-PythonStepBlockReason') 'UI uses Get-PythonStepBlockReason'

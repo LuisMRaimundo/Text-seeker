@@ -194,6 +194,19 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         # Next handler must respect the gate.
         self.assertIn("if (-not (Test-CanLeaveCurrentStep)) { return }", ui)
 
+    def test_private_python_install_is_robust(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # Must not use the automatic $args variable for installer arguments.
+        self.assertNotRegex(cfg, r"\$args\s*=")
+        # Must tolerate async completion and TargetDir being ignored (repair mode).
+        self.assertIn("Wait-ForFile", cfg)
+        self.assertIn("Find-PythonExeUnder", cfg)
+        self.assertIn("LOCALAPPDATA", cfg)
+        # 3010 (reboot-requested) is treated as success.
+        self.assertIn("3010", cfg)
+        # Honors a private TargetDir.
+        self.assertIn("TargetDir=$TargetDir", cfg)
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402

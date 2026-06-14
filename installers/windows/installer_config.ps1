@@ -238,6 +238,27 @@ function Remove-LegacyEmbedRuntime {
     return $legacy
 }
 
+function Wait-ForFile {
+    # The python.org installer can relaunch itself, so python.exe may appear a few
+    # seconds after Start-Process -Wait returns. Poll briefly before giving up.
+    param([string]$Path, [int]$TimeoutSeconds = 90)
+    for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return (Test-Path -LiteralPath $Path -PathType Leaf)
+}
+
+function Find-PythonExeUnder {
+    param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    $direct = Join-Path $Root 'python.exe'
+    if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
+    $found = Get-ChildItem -LiteralPath $Root -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { return $found.FullName }
+    return $null
+}
+
 function Install-PrivatePythonTo {
     param([string]$TargetDir)
     Assert-OfficialPythonInstallerUrl -Url $script:PythonInstallerUrl
@@ -253,16 +274,64 @@ function Install-PrivatePythonTo {
     }
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
     $installerPath = Join-Path $Temp 'python-installer.exe'
-    Write-InstallLog "Installing private Python $PythonVersion to $TargetDir"
+    Write-InstallLog "Downloading Python $PythonVersion installer: $script:PythonInstallerUrl"
     Invoke-WebRequest -Uri $script:PythonInstallerUrl -OutFile $installerPath -UseBasicParsing
+    if (-not (Test-Path -LiteralPath $installerPath)) {
+        throw "Python installer download failed (no file at $installerPath)."
+    }
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
-    $args = @('/quiet','InstallAllUsers=0','PrependPath=0','Include_test=0','Include_launcher=0','Include_pip=1','Include_tcltk=1','SimpleInstall=1',"TargetDir=$TargetDir")
-    $proc = Start-Process -FilePath $installerPath -ArgumentList $args -Wait -PassThru
-    if ($proc.ExitCode -ne 0) { throw "Python installer failed (exit $($proc.ExitCode))." }
-    if (-not (Test-Path -LiteralPath $pyExe)) { throw "Python installer finished but python.exe not found at $pyExe" }
-    & $pyExe -c "import tkinter; tkinter.Tk().destroy()"
-    if ($LASTEXITCODE -ne 0) { throw 'Tkinter is not available in the private Python runtime.' }
-    Write-InstallLog "Private Python installed: $pyExe"
+
+    # Per-user, no admin, no system PATH. TargetDir is honored by the official installer.
+    $pyArgs = @(
+        '/quiet'
+        'InstallAllUsers=0'
+        'PrependPath=0'
+        'AssociateFiles=0'
+        'Shortcuts=0'
+        'Include_launcher=0'
+        'InstallLauncherAllUsers=0'
+        'Include_test=0'
+        'Include_doc=0'
+        'Include_pip=1'
+        'Include_tcltk=1'
+        "TargetDir=$TargetDir"
+    )
+    Write-InstallLog ("Running Python installer: " + ($pyArgs -join ' '))
+    $proc = Start-Process -FilePath $installerPath -ArgumentList $pyArgs -Wait -PassThru
+    Write-InstallLog "Python installer exit code: $($proc.ExitCode)"
+    # 0 = success, 3010 = success but reboot requested.
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        throw "Python installer failed (exit $($proc.ExitCode)). See log: $script:InstallLogPath"
+    }
+
+    # Wait for python.exe to appear at the target (installer may finish asynchronously).
+    if (-not (Wait-ForFile -Path $pyExe -TimeoutSeconds 90)) {
+        Write-InstallLog "python.exe not at $pyExe yet; searching target and default locations." 'WARN'
+        $located = Find-PythonExeUnder -Root $TargetDir
+        if (-not $located) {
+            # The installer may have ignored TargetDir and used its default per-user dir.
+            $verNoDots = ($PythonVersion -split '\.')[0..1] -join ''
+            $fallbacks = @(
+                (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots\python.exe"),
+                (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots-32\python.exe")
+            )
+            foreach ($fb in $fallbacks) {
+                if (Test-Path -LiteralPath $fb -PathType Leaf) { $located = $fb; break }
+            }
+        }
+        if ($located) {
+            Write-InstallLog "Using Python found at: $located" 'WARN'
+            $pyExe = $located
+        } else {
+            throw "Python installer finished (exit $($proc.ExitCode)) but python.exe was not found under $TargetDir or the default per-user location. See log: $script:InstallLogPath"
+        }
+    }
+
+    $check = Test-PythonCandidate -ExePath $pyExe
+    if (-not $check.TkOk) {
+        throw "Private Python installed but Tkinter is not available ($($check.Reason)). See log: $script:InstallLogPath"
+    }
+    Write-InstallLog "Private Python ready: $pyExe ($($check.Version))"
     return $pyExe
 }
 
@@ -303,9 +372,9 @@ function Install-PrivateTesseractTo {
     }
     if (Test-Path -LiteralPath $TargetDir) { Remove-Item -LiteralPath $TargetDir -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
-    $args = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$TargetDir")
+    $tessArgs = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$TargetDir")
     try {
-        $proc = Start-Process -FilePath $installer -ArgumentList $args -Wait -PassThru
+        $proc = Start-Process -FilePath $installer -ArgumentList $tessArgs -Wait -PassThru
         if ($proc.ExitCode -ne 0) { Write-InstallLog "Tesseract installer exit $($proc.ExitCode)" 'WARN' }
     } catch {
         Write-InstallLog "Tesseract installer failed: $($_.Exception.Message)" 'WARN'
