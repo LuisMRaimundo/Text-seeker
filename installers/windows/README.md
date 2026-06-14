@@ -10,6 +10,9 @@
 | `INSTALL.bat` | Short alias for `Install and Run.bat` |
 | `installer_ui.ps1` | Installer wizard (Windows Forms; console fallback) |
 | `installer_config.ps1` | Detection, downloads, install logic (used by the wizard) |
+| `installer_wizard_logic.ps1` | Wizard step/navigation helpers (testable) |
+| `tests/InstallWizard.Tests.ps1` | Installer navigation unit tests |
+| `tests/Run-InstallerTests.bat` | Run installer tests |
 
 Runtime data (not in Git): `installers\runtime\windows\` — Python, tools, `install_state.json`, `install.log`.
 
@@ -43,6 +46,22 @@ Configuration is saved to **`installers\runtime\windows\install_state.json`**.
 ## Install log
 
 `installers\runtime\windows\install.log`
+
+## Installer tests
+
+From this folder:
+
+```bat
+tests\Run-InstallerTests.bat
+```
+
+Or:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\InstallWizard.Tests.ps1
+```
+
+Project-wide tests also include wizard policy checks in `tests/test_windows_installer_runtime.py`.
 
 ## Diagnostics
 

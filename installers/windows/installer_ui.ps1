@@ -3,6 +3,7 @@
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'installer_config.ps1')
+. (Join-Path $PSScriptRoot 'installer_wizard_logic.ps1')
 
 function Show-ConsoleInstallerWizard {
     Write-Host ''
@@ -126,8 +127,8 @@ function Show-WinFormsInstallerWizard {
     Add-Type -AssemblyName System.Drawing
 
     $choices = Get-DefaultInstallChoices
-    $step = 0
-    $maxStep = 6
+    $script:WizardStep = 0
+    $maxStep = Get-InstallerWizardMaxStep
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'text-seeker Windows Installer'
@@ -177,13 +178,21 @@ function Show-WinFormsInstallerWizard {
         $panel.Controls.Clear()
     }
 
+    function Update-WizardButtons {
+        $nav = Get-InstallerWizardNavigationState -Step $script:WizardStep -MaxStep $maxStep
+        $btnBack.Enabled = $nav.BackEnabled
+        $btnNext.Enabled = $nav.NextEnabled
+        $btnInstall.Enabled = $nav.InstallEnabled
+        if ($nav.StepTitle) {
+            $form.Text = "text-seeker Windows Installer — $($nav.StepTitle) ($($script:WizardStep + 1)/$($maxStep + 1))"
+        }
+    }
+
     function Show-Step {
         Clear-Panel
-        $btnBack.Enabled = ($step -gt 0)
-        $btnNext.Enabled = ($step -lt $maxStep)
-        $btnInstall.Enabled = ($step -eq $maxStep)
+        Update-WizardButtons
 
-        switch ($step) {
+        switch ($script:WizardStep) {
             0 {
                 $y = 10
                 Add-Label 'Welcome to text-seeker setup' 10 $y 560 24 $true
@@ -267,16 +276,7 @@ function Show-WinFormsInstallerWizard {
                 $y = 10
                 Add-Label 'Review and install' 10 $y 560 24 $true
                 $y += 35
-                $summary = @(
-                    "Python mode: $($choices.PythonMode)"
-                    "Python path: $($choices.PythonPath)"
-                    "Install packages: $($choices.InstallPackages)"
-                    "Tesseract: $($choices.TesseractMode)"
-                    "Poppler: $($choices.PopplerMode)"
-                    "PATH policy: $($choices.PathPolicy)"
-                    "Private Python dir: $($choices.PrivatePythonDir)"
-                    "Log file: $InstallLogPath"
-                ) -join "`r`n"
+                $summary = New-InstallerWizardSummaryText -Choices $choices -LogPath $InstallLogPath
                 $script:txtSummary = New-Object System.Windows.Forms.TextBox
                 $script:txtSummary.Multiline = $true
                 $script:txtSummary.ReadOnly = $true
@@ -322,7 +322,7 @@ function Show-WinFormsInstallerWizard {
     }
 
     function Save-StepChoices {
-        switch ($step) {
+        switch ($script:WizardStep) {
             1 {
                 if ($script:rbSystem.Checked) {
                     $choices.PythonMode = 'system'
@@ -365,11 +365,15 @@ function Show-WinFormsInstallerWizard {
 
     $btnNext.Add_Click({
         Save-StepChoices
-        if ($step -lt $maxStep) { $script:step++; Show-Step }
+        $nav = Move-InstallerWizardStep -CurrentStep $script:WizardStep -Direction 'Next' -MaxStep $maxStep
+        $script:WizardStep = $nav.Step
+        Show-Step
     })
     $btnBack.Add_Click({
         Save-StepChoices
-        if ($step -gt 0) { $script:step--; Show-Step }
+        $nav = Move-InstallerWizardStep -CurrentStep $script:WizardStep -Direction 'Back' -MaxStep $maxStep
+        $script:WizardStep = $nav.Step
+        Show-Step
     })
     $btnCancel.Add_Click({ $form.Close() })
     $btnInstall.Add_Click({

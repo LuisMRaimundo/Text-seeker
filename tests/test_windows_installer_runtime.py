@@ -133,6 +133,23 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertNotIn("raise RuntimeError", launch)
         self.assertIn("WARNING: Tesseract unavailable", launch)
 
+    def test_wizard_navigation_reaches_install_step(self):
+        sys.path.insert(0, str(COMMON))
+        # Regression: WinForms handler must not mix $step with $script:step
+        ui = SETUP_UI.read_text(encoding="utf-8")
+        self.assertIn("$script:WizardStep", ui)
+        self.assertIn("Move-InstallerWizardStep", ui)
+        self.assertNotIn("$script:step++", ui.lower())
+
+        logic_path = WINDOWS / "installer_wizard_logic.ps1"
+        self.assertTrue(logic_path.is_file())
+        text = logic_path.read_text(encoding="utf-8")
+        self.assertIn("Get-InstallerWizardNavigationState", text)
+        self.assertIn("InstallEnabled", text)
+
+        tests_ps1 = WINDOWS / "tests" / "InstallWizard.Tests.ps1"
+        self.assertTrue(tests_ps1.is_file())
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402
