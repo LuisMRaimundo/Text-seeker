@@ -81,6 +81,7 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |
 | Old ZIP / embed Python errors | Download a fresh ZIP from **main**; delete `installers\runtime\` and reinstall |
+| `Unexpected token` / parse errors in `installer_ui.ps1` | Caused by non-ASCII characters in a `.ps1` file read by Windows PowerShell 5.1. Re-download a fresh ZIP from **main**. |
 
 ## Developers
 
@@ -90,3 +91,8 @@ If Python 3.10+ with tkinter is already installed:
 pip install -r requirements.txt
 python app.py --gui
 ```
+
+**Installer scripts must be pure ASCII.** Windows PowerShell 5.1 reads BOM-less
+`.ps1` files as Windows-1252, so non-ASCII characters (e.g. `—`) corrupt parsing.
+Use plain `-` instead. This is enforced by `tests/InstallWizard.Tests.ps1` and
+`tests/test_windows_installer_runtime.py`.

@@ -35,6 +35,8 @@ run_tests.bat
 
 Or: `python -m unittest discover -s tests -v`
 
+Windows installer wizard tests: `installers\windows\tests\Run-InstallerTests.bat`.
+
 Continuous integration runs the same test suite on push (see `.github/workflows/test.yml`).
 
 ## Repository layout
