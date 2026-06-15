@@ -81,6 +81,7 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | Clean machine (no Python/Tesseract/Poppler) | Choose **Install managed Python** (default). It downloads a self-contained Python build (python-build-standalone) and extracts it to `installers\runtime\windows\python` (no admin, no registry, no system installer), then builds the project venv. Tesseract/Poppler are installed if possible; failures are warnings only. |
 | Managed Python download/extract failed | Check `installers\runtime\windows\install.log`. Needs internet and the built-in `tar.exe` (Windows 10 1803+/11). If a Python is already installed, choose **Use detected compatible Python** instead. The launch interpreter is always the venv at `installers\runtime\windows\venv\Scripts\python.exe`. |
 | Tesseract/Poppler failed | Warning only — GUI still runs; OCR features limited |
+| Scanned PDFs return no results | OCR needs Tesseract + Poppler + language data. The installer bundles `eng`+`por` data under `installers\runtime\windows\tessdata` and points `TESSDATA_PREFIX` at it via the venv. Launch through **Install and Run.bat** so the OCR tools are on the process PATH. |
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |
 | Old ZIP / embed Python errors | Download a fresh ZIP from **main**; delete `installers\runtime\` and reinstall |

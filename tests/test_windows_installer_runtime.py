@@ -310,6 +310,25 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertIn("$ErrorActionPreference = 'SilentlyContinue'", depfn)
         self.assertNotIn("-c $verify", cfg)
 
+    def test_bundles_ocr_language_data(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # Downloads eng+por OCR language data privately and records it in state.
+        self.assertIn("function Install-TessData", cfg)
+        self.assertIn("$script:TessdataLangs = @('eng', 'por')", cfg)
+        self.assertIn("traineddata", cfg)
+        self.assertIn("ocr_languages", cfg)
+        # sitecustomize points TESSDATA_PREFIX at the private tessdata so por+eng OCR works.
+        self.assertIn("TESSDATA_PREFIX", cfg)
+        self.assertIn('os.path.join(runtime_win, "tessdata")', cfg)
+        # config exposes the private tessdata dir.
+        sys.path.insert(0, str(COMMON))
+        import importlib, config as _c
+        importlib.reload(_c)
+        from config import windows_tessdata_dir, WINDOWS_TESSDATA_LANGS  # noqa: E402
+        self.assertTrue(str(windows_tessdata_dir()).endswith("tessdata"))
+        self.assertIn("por", WINDOWS_TESSDATA_LANGS)
+        self.assertIn("eng", WINDOWS_TESSDATA_LANGS)
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402

@@ -27,6 +27,10 @@ WINDOWS_TESSERACT_INSTALLER_URLS: tuple[str, ...] = (
 )
 # Back-compat alias — first (preferred) URL.
 WINDOWS_TESSERACT_INSTALLER = WINDOWS_TESSERACT_INSTALLER_URLS[0]
+# OCR language data (Tesseract). Bundled privately so por+eng OCR works even when
+# the system Tesseract lacks a language pack. tessdata_fast = small + fast.
+WINDOWS_TESSDATA_LANGS = ("eng", "por")
+WINDOWS_TESSDATA_BASE_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
 WINDOWS_POPPLER_VERSION = "24.08.0-0"
 WINDOWS_POPPLER_ZIP = (
     "https://github.com/oschwartz10612/poppler-windows/releases/download/"
@@ -294,6 +298,11 @@ def windows_tesseract_exe() -> Path:
 
 def windows_tesseract_tessdata_dir() -> Path:
     return windows_tesseract_dir() / "tessdata"
+
+
+def windows_tessdata_dir() -> Path:
+    """Private OCR language-data dir (TESSDATA_PREFIX target)."""
+    return windows_runtime_root() / "tessdata"
 
 
 def windows_poppler_root() -> Path:

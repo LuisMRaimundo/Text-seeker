@@ -29,6 +29,10 @@ $script:TesseractInstallerUrls = @(
     "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TesseractVersion.exe"
 )
 $script:PopplerZipUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v$PopplerVersion/Release-$PopplerVersion.zip"
+# OCR language data (bundled privately so por+eng OCR works regardless of system Tesseract).
+$script:TessdataLangs = @('eng', 'por')
+$script:TessdataBaseUrl = 'https://github.com/tesseract-ocr/tessdata_fast/raw/main'
+$script:DefaultTessdataDir = Join-Path $RuntimeRoot 'tessdata'
 
 function Write-InstallLog {
     param([string]$Message, [string]$Level = 'INFO')
@@ -434,6 +438,14 @@ try:
                     os.environ.setdefault("TCL_LIBRARY", full)
                 elif low.startswith("tk8"):
                     os.environ.setdefault("TK_LIBRARY", full)
+    # Private OCR language data (eng+por) lives next to the venv: <runtime\windows>\tessdata
+    runtime_win = os.path.dirname(sys.prefix)
+    tessdata = os.path.join(runtime_win, "tessdata")
+    if os.path.isdir(tessdata):
+        os.environ.setdefault("TESSDATA_PREFIX", tessdata)
+        poppler_bin = os.path.join(runtime_win, "poppler", "bin")
+        if os.path.isdir(poppler_bin):
+            os.environ["PATH"] = poppler_bin + os.pathsep + os.environ.get("PATH", "")
 except Exception:
     pass
 '@
@@ -606,6 +618,25 @@ function Install-PrivatePopplerTo {
     return $bin
 }
 
+function Install-TessData {
+    # Download eng+por OCR language data into the private tessdata dir (warning-only).
+    param([string]$TargetDir)
+    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    $present = @()
+    foreach ($lang in $script:TessdataLangs) {
+        $dest = Join-Path $TargetDir "$lang.traineddata"
+        if (Test-Path -LiteralPath $dest) { $present += $lang; continue }
+        $url = "$($script:TessdataBaseUrl)/$lang.traineddata"
+        if (Invoke-DownloadOptional -Url $url -Dest $dest) {
+            Write-InstallLog "OCR language data ready: $dest"
+            $present += $lang
+        } else {
+            Write-InstallLog "OCR language data unavailable: $lang (scanned-PDF OCR for that language may not work)." 'WARN'
+        }
+    }
+    return $present
+}
+
 function Get-OcrCapabilityTag {
     param([bool]$TessOk, [bool]$PopOk)
     if ($TessOk -and $PopOk) { return 'ok' }
@@ -744,6 +775,15 @@ function Invoke-InstallerRun {
         $popModeState = 'missing'
     }
 
+    # --- OCR language data (eng+por) so scanned-PDF OCR finds Portuguese (warning-only) ---
+    $ocrLangs = @()
+    if ($Choices.TesseractMode -ne 'skip') {
+        $ocrLangs = Install-TessData -TargetDir $script:DefaultTessdataDir
+        if ($ocrLangs.Count -gt 0) {
+            Write-InstallLog ("OCR languages available: " + ($ocrLangs -join '+'))
+        }
+    }
+
     $tessOk = [bool]($tessExe -and (Test-Path -LiteralPath $tessExe))
     $popOk = [bool]($popBin -and (Test-Path -LiteralPath (Join-Path $popBin 'pdftotext.exe')))
     $ocrTag = Get-OcrCapabilityTag -TessOk $tessOk -PopOk $popOk
@@ -773,6 +813,8 @@ function Invoke-InstallerRun {
         user_path_entries_added = @($userAdded)
         private_tesseract_dir = $Choices.PrivateTesseractDir
         private_poppler_dir = $Choices.PrivatePopplerDir
+        tessdata_dir = if ($ocrLangs.Count -gt 0) { $script:DefaultTessdataDir } else { '' }
+        ocr_languages = ($ocrLangs -join '+')
         runtime_root = $RuntimeRoot
         ocr_capability = $ocrTag
         gui_ready = $guiReady
