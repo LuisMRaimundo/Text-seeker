@@ -44,14 +44,17 @@ REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
 STATE_INSTALLER_VERSION = "installer_version"
 STATE_INSTALL_TIMESTAMP = "install_timestamp"
 STATE_PYTHON_MODE = "python_mode"
-STATE_PYTHON_PATH = "python_path"
+STATE_BASE_PYTHON_PATH = "base_python_path"
+STATE_VENV_PYTHON_PATH = "venv_python_path"
+STATE_PYTHON_PATH = "python_path"  # legacy alias (kept for back-compat reads)
 STATE_PYTHON_SCRIPTS_PATH = "python_scripts_path"
 STATE_VENV_PATH = "venv_path"
 STATE_PACKAGES_INSTALLED = "packages_installed"
 STATE_TESSERACT_MODE = "tesseract_mode"
 STATE_TESSERACT_PATH = "tesseract_path"
 STATE_POPPLER_MODE = "poppler_mode"
-STATE_POPPLER_BIN = "poppler_bin"
+STATE_POPPLER_BIN = "poppler_bin"  # legacy alias
+STATE_POPPLER_BIN_PATH = "poppler_bin_path"
 STATE_PATH_POLICY = "path_policy"
 STATE_USER_PATH_MODIFIED = "user_path_modified"
 STATE_USER_PATH_ENTRIES = "user_path_entries_added"
@@ -60,22 +63,35 @@ STATE_PRIVATE_TESSERACT_DIR = "private_tesseract_dir"
 STATE_PRIVATE_POPPLER_DIR = "private_poppler_dir"
 STATE_RUNTIME_ROOT = "runtime_root"
 STATE_OCR_CAPABILITY = "ocr_capability"
-STATE_GUI_CAN_LAUNCH = "gui_can_launch"
+STATE_GUI_READY = "gui_ready"
+STATE_GUI_CAN_LAUNCH = "gui_can_launch"  # legacy alias
 STATE_TEXT_SEARCH_AVAILABLE = "text_search_available"
 
 PATH_POLICY_PROCESS_LOCAL = "process_local"
 PATH_POLICY_USER_TOOLS = "user_tools"
 PATH_POLICY_USER_TOOLS_PYTHON = "user_tools_python"
+PATH_POLICY_USER_PATH_OPT_IN = "user_path_opt_in"
 
+# Wizard-internal short tokens
+PYTHON_MODE_MANAGED = "managed"
+PYTHON_MODE_DETECTED = "detected"
+PYTHON_MODE_CUSTOM = "custom"
+# install_state.json values
+PYTHON_STATE_MANAGED = "managed_installed"
+PYTHON_STATE_DETECTED = "detected_existing"
+PYTHON_STATE_CUSTOM = "custom"
+# legacy aliases (older states)
 PYTHON_MODE_SYSTEM = "system"
 PYTHON_MODE_PRIVATE = "private"
-PYTHON_MODE_CUSTOM = "custom"
 PYTHON_MODE_VENV = "venv"
 
 TOOL_MODE_DETECTED = "detected"
 TOOL_MODE_PRIVATE = "private"
+TOOL_MODE_PRIVATE_INSTALLED = "private_installed"
 TOOL_MODE_CUSTOM = "custom"
 TOOL_MODE_SKIP = "skip"
+TOOL_MODE_SKIPPED = "skipped"
+TOOL_MODE_MISSING = "missing"
 
 PBS_TAG = "20240415"
 
@@ -126,21 +142,30 @@ def default_private_venv_dir() -> Path:
 
 
 def resolve_python_exe_from_state(state: dict | None = None) -> Path | None:
-    """Return configured Python executable from install state."""
+    """Return the launch Python from install state.
+
+    Prefers the project-local venv Python, then legacy/base Python fields.
+    """
     state = state if state is not None else load_install_state()
     if not state:
         legacy = runtime_python_exe("windows")
         return legacy if legacy.is_file() else None
-    raw = state.get(STATE_PYTHON_PATH) or ""
-    if not raw:
-        return None
-    path = Path(raw)
-    return path if path.is_file() else None
+    for key in (STATE_VENV_PYTHON_PATH, STATE_PYTHON_PATH, STATE_BASE_PYTHON_PATH):
+        raw = state.get(key) or ""
+        if raw:
+            path = Path(raw)
+            if path.is_file():
+                return path
+    return None
+
+
+def _tool_skipped(mode: str | None) -> bool:
+    return mode in (TOOL_MODE_SKIP, TOOL_MODE_SKIPPED, TOOL_MODE_MISSING)
 
 
 def resolve_tesseract_exe_from_state(state: dict | None = None) -> Path | None:
     state = state if state is not None else load_install_state()
-    if state and state.get(STATE_TESSERACT_MODE) == TOOL_MODE_SKIP:
+    if state and _tool_skipped(state.get(STATE_TESSERACT_MODE)):
         return None
     raw = (state or {}).get(STATE_TESSERACT_PATH) or ""
     if raw:
@@ -153,9 +178,9 @@ def resolve_tesseract_exe_from_state(state: dict | None = None) -> Path | None:
 
 def resolve_poppler_bin_from_state(state: dict | None = None) -> Path | None:
     state = state if state is not None else load_install_state()
-    if state and state.get(STATE_POPPLER_MODE) == TOOL_MODE_SKIP:
+    if state and _tool_skipped(state.get(STATE_POPPLER_MODE)):
         return None
-    raw = (state or {}).get(STATE_POPPLER_BIN) or ""
+    raw = (state or {}).get(STATE_POPPLER_BIN_PATH) or (state or {}).get(STATE_POPPLER_BIN) or ""
     if raw:
         path = Path(raw)
         if path.is_dir():
@@ -165,26 +190,40 @@ def resolve_poppler_bin_from_state(state: dict | None = None) -> Path | None:
 
 
 def process_path_parts_from_state(state: dict | None, py: Path) -> list[str]:
-    """Build process-local PATH prepend list from install state."""
+    """Build process-local PATH prepend list from install state.
+
+    The launch Python is normally the project-local venv; its Scripts dir and the
+    base Python folder are prepended (process-local only), then OCR tools.
+    """
     state = state or {}
     parts: list[str] = []
-    py_dir = py.parent
-    scripts = state.get(STATE_PYTHON_SCRIPTS_PATH) or str(py_dir / "Scripts")
-    venv = state.get(STATE_VENV_PATH) or ""
-    if venv:
-        vpath = Path(venv)
-        if (vpath / "Scripts").is_dir():
-            parts.extend([str(vpath / "Scripts"), str(vpath)])
-        elif vpath.is_dir():
-            parts.append(str(vpath))
-    parts.extend([str(py_dir), scripts])
+
+    # venv first (launch interpreter)
+    venv_py = state.get(STATE_VENV_PYTHON_PATH) or ""
+    if venv_py:
+        vp = Path(venv_py)
+        parts.extend([str(vp.parent), str(vp.parent.parent)])
+    legacy_venv = state.get(STATE_VENV_PATH) or ""
+    if legacy_venv:
+        lv = Path(legacy_venv)
+        if (lv / "Scripts").is_dir():
+            parts.extend([str(lv / "Scripts"), str(lv)])
+
+    # base Python
+    base_py = state.get(STATE_BASE_PYTHON_PATH) or state.get(STATE_PYTHON_PATH) or ""
+    if base_py:
+        bp = Path(base_py)
+        parts.extend([str(bp.parent), str(bp.parent / "Scripts")])
+
+    # the resolved launch python (fallback / ensures parent on PATH)
+    parts.extend([str(py.parent), str(py.parent / "Scripts")])
 
     tess_raw = state.get(STATE_TESSERACT_PATH) or ""
-    if tess_raw and state.get(STATE_TESSERACT_MODE) != TOOL_MODE_SKIP:
+    if tess_raw and not _tool_skipped(state.get(STATE_TESSERACT_MODE)):
         parts.append(str(Path(tess_raw).parent))
 
-    pop_raw = state.get(STATE_POPPLER_BIN) or ""
-    if pop_raw and state.get(STATE_POPPLER_MODE) != TOOL_MODE_SKIP:
+    pop_raw = state.get(STATE_POPPLER_BIN_PATH) or state.get(STATE_POPPLER_BIN) or ""
+    if pop_raw and not _tool_skipped(state.get(STATE_POPPLER_MODE)):
         parts.append(str(Path(pop_raw)))
 
     # De-duplicate while preserving order

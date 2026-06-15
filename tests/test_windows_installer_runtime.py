@@ -63,8 +63,9 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         lower = cfg.lower()
         self.assertIn("tesseract unavailable; ocr for scanned images may not work.", lower)
         self.assertIn("poppler unavailable; scanned-pdf conversion may not work.", lower)
-        self.assertIn("throw", cfg[cfg.lower().find("install-privatepythonto") :])
-        self.assertIn("throw", cfg[cfg.lower().find("install-pythonpackagesto") :])
+        # venv/managed Python failures are hard-fail (throw); OCR tools are warning-only.
+        self.assertIn("throw", cfg[cfg.lower().find("function new-textseekervenv") :])
+        self.assertIn("throw", cfg[cfg.lower().find("function install-managedpython") :])
 
     def test_default_path_policy_process_local_only(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8").lower()
@@ -102,25 +103,41 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertEqual(STATE_PATH_POLICY, "path_policy")
         self.assertEqual(STATE_OCR_CAPABILITY, "ocr_capability")
 
-    def test_process_local_path_from_state(self):
+    def test_process_local_path_includes_venv_scripts(self):
         sys.path.insert(0, str(COMMON))
         from config import process_path_parts_from_state  # noqa: E402
 
-        py = ROOT / "installers" / "runtime" / "windows" / "python" / "python.exe"
+        rt = ROOT / "installers" / "runtime" / "windows"
+        venv_py = rt / "venv" / "Scripts" / "python.exe"
         state = {
-            "python_scripts_path": str(py.parent / "Scripts"),
-            "venv_path": "",
-            "tesseract_path": str(ROOT / "installers" / "runtime" / "windows" / "tesseract" / "tesseract.exe"),
-            "poppler_bin": str(ROOT / "installers" / "runtime" / "windows" / "poppler" / "bin"),
-            "tesseract_mode": "private",
-            "poppler_mode": "private",
+            "venv_python_path": str(venv_py),
+            "base_python_path": str(rt / "python" / "python.exe"),
+            "tesseract_path": str(rt / "tesseract" / "tesseract.exe"),
+            "poppler_bin_path": str(rt / "poppler" / "bin"),
+            "tesseract_mode": "private_installed",
+            "poppler_mode": "private_installed",
         }
-        parts = process_path_parts_from_state(state, py)
+        parts = process_path_parts_from_state(state, venv_py)
         joined = ";".join(parts).lower()
-        self.assertIn("python", joined)
+        # venv Scripts is the launch interpreter dir and must be on the process PATH.
+        self.assertIn(str(venv_py.parent).lower(), joined)
+        self.assertIn("venv", joined)
         self.assertIn("scripts", joined)
         self.assertIn("tesseract", joined)
         self.assertIn("poppler", joined)
+
+    def test_venv_is_launch_python(self):
+        sys.path.insert(0, str(COMMON))
+        import importlib
+        import config as _config
+        importlib.reload(_config)
+        from config import resolve_python_exe_from_state, STATE_VENV_PYTHON_PATH  # noqa: E402
+
+        # venv python is preferred over a base/system python in state.
+        self.assertEqual(STATE_VENV_PYTHON_PATH, "venv_python_path")
+        # The resolver prefers the venv key (file existence aside, key order matters).
+        src = (COMMON / "config.py").read_text(encoding="utf-8")
+        self.assertIn("STATE_VENV_PYTHON_PATH, STATE_PYTHON_PATH, STATE_BASE_PYTHON_PATH", src)
 
     def test_doctor_and_launch_use_install_state(self):
         bootstrap = (COMMON / "bootstrap.py").read_text(encoding="utf-8")
@@ -162,13 +179,54 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
                 msg=f"{name} contains non-ASCII bytes: {non_ascii[:8]}",
             )
 
-    def test_python_selection_default_not_cpython_root(self):
+    def test_clean_machine_defaults_to_managed_python(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # Default Python must never be a bare 'C:\Python'.
         self.assertNotRegex(cfg, r"PythonPath\s*=\s*['\"]C:\\Python['\"]")
-        # Default mode is system or private; private points under the runtime.
-        self.assertIn("$pyMode = if ($detectedPy) { 'system' } else { 'private' }", cfg)
-        self.assertIn("DefaultPrivatePythonDir", cfg)
+        # No-compatible-Python default = managed; detected default only when one exists.
+        self.assertIn("$pyMode = if ($detectedPy) { 'detected' } else { 'managed' }", cfg)
+        # Custom never the default; custom path empty unless detected.
+        self.assertIn("PythonPath = if ($detectedPy) { $detectedPy.Path } else { '' }", cfg)
+
+    def test_managed_python_normal_per_user_install(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Install-ManagedPython", cfg)
+        # Normal per-user install: explicit array, /log, no forced custom TargetDir.
+        self.assertIn("$pyArgs = @(", cfg)
+        for token in ("/log", "InstallAllUsers=0", "PrependPath=0",
+                      "Include_exe=1", "Include_lib=1", "Include_pip=1", "Include_tcltk=1"):
+            self.assertIn(token, cfg, msg=token)
+        # Managed install does not force a fragile custom TargetDir.
+        managed = cfg[cfg.index("function Install-ManagedPython"):cfg.index("function New-TextSeekerVenv")]
+        self.assertNotIn("TargetDir=", managed)
+        # Locate via launcher/per-user/registry; per-user diagnostics retained.
+        self.assertIn("py.exe", cfg)
+        self.assertIn("LOCALAPPDATA", cfg)
+
+    def test_always_creates_project_venv(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        self.assertIn("function New-TextSeekerVenv", cfg)
+        self.assertIn("-m venv", cfg)
+        # requirements install target is the venv python, not global.
+        venv = cfg[cfg.index("function New-TextSeekerVenv"):]
+        self.assertIn("$venvPy -m pip install -r $Requirements", venv)
+        # Invoke-InstallerRun launches from the venv python.
+        self.assertIn("$venvPy = New-TextSeekerVenv", cfg)
+        self.assertIn("$launchPy = $venvPy", cfg)
+
+    def test_install_state_records_paths_and_status(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        for field in ("base_python_path", "venv_python_path", "packages_installed",
+                      "tesseract_mode", "tesseract_path", "poppler_mode", "poppler_bin_path",
+                      "path_policy", "gui_ready", "ocr_capability",
+                      "install_timestamp", "installer_version"):
+            self.assertIn(field, cfg, msg=field)
+
+    def test_gui_ready_independent_of_ocr(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # gui_ready derives from the venv Python validation, not from OCR tools.
+        self.assertIn("$guiReady = [bool](Test-PrivatePythonValid -PyExe $launchPy)", cfg)
+        self.assertIn("gui_ready = $guiReady", cfg)
 
     def test_custom_python_path_is_resolved_and_validated(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
@@ -183,9 +241,9 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         logic = (WINDOWS / "installer_wizard_logic.ps1").read_text(encoding="utf-8")
         self.assertIn("function Get-PythonStepBlockReason", logic)
         self.assertIn("Selected Python is not valid", logic)
-        self.assertIn("Install private Python", logic)
-        # Private mode must not be blocked at the Python step.
-        self.assertRegex(logic, r"if \(\$Mode -eq 'private'\) \{ return \$null \}")
+        self.assertIn("managed Python install", logic)
+        # Managed mode must not be blocked at the Python step.
+        self.assertIn("$Mode -eq 'managed'", logic)
 
     def test_wizard_gates_next_on_python_step(self):
         ui = SETUP_UI.read_text(encoding="utf-8")
@@ -194,40 +252,13 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         # Next handler must respect the gate.
         self.assertIn("if (-not (Test-CanLeaveCurrentStep)) { return }", ui)
 
-    def test_private_python_install_is_robust(self):
+    def test_managed_install_is_robust(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # Must not use the automatic $args variable for installer arguments.
         self.assertNotRegex(cfg, r"\$args\s*=")
-        # Must tolerate async completion.
-        self.assertIn("Wait-ForFile", cfg)
-        self.assertIn("Find-PythonExeUnder", cfg)
         # 3010 (reboot-requested) is treated as success.
         self.assertIn("3010", cfg)
-
-    def test_private_python_installer_args(self):
-        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
-        for token in (
-            "TargetDir=$TargetDir",
-            "Include_exe=1",
-            "Include_lib=1",
-            "Include_pip=1",
-            "Include_tcltk=1",
-            "PrependPath=0",
-            "InstallAllUsers=0",
-            "/log",
-        ):
-            self.assertIn(token, cfg, msg=token)
-        # Args must be built as an array, not an interpolated string.
-        self.assertIn("$pyArgs = @(", cfg)
-
-    def test_private_python_no_silent_switch_to_per_user(self):
-        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
-        # Per-user location is referenced only for diagnostics, never used as success.
-        self.assertIn("LOCALAPPDATA", cfg)
-        self.assertIn("DIAGNOSTIC", cfg)
-        # The private search is scoped to the runtime root, not the per-user dir.
-        self.assertIn("Find-PythonExeUnder -Root $RuntimeRoot", cfg)
-        # Full end-to-end validation of the private interpreter.
+        # Full end-to-end validation of the venv interpreter.
         self.assertIn("import sys, pip, tkinter", cfg)
         self.assertIn("python-installer.log", cfg)
 

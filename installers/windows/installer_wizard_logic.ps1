@@ -82,10 +82,10 @@ function Get-PythonStepBlockReason {
         [bool]$CandidateReady = $false,
         [string]$CandidateReason = ''
     )
-    # Private mode installs Python later; never validate a path here.
-    if ($Mode -eq 'private') { return $null }
+    # Managed mode installs/locates Python later; never validate a path here.
+    if ($Mode -eq 'managed' -or $Mode -eq 'private') { return $null }
     if ($CandidateReady) { return $null }
-    $base = "Selected Python is not valid. Choose python.exe or select 'Install private Python'."
+    $base = "Selected Python is not valid. Choose a valid python.exe or select managed Python install."
     if ($CandidateReason) {
         return "$base`r`n`r`nDetail: $CandidateReason"
     }
@@ -101,7 +101,7 @@ function New-InstallerWizardSummaryText {
         "Tesseract: $($Choices.TesseractMode)"
         "Poppler: $($Choices.PopplerMode)"
         "PATH policy: $($Choices.PathPolicy)"
-        "Private Python dir: $($Choices.PrivatePythonDir)"
+        "Project venv: $($Choices.VenvDir)"
         "Log file: $LogPath"
     ) -join "`r`n"
 }
