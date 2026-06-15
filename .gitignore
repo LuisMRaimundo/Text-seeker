@@ -16,9 +16,6 @@ build/
 dist/
 *.egg-info/
 
-# Autonomous installers (portable Python per machine)
-installers/runtime/
-
 # User data
 .text-seeker_index/
 .text-seeker_cache/

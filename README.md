@@ -6,26 +6,28 @@ Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, 
 
 **Supported formats:** TXT, PDF, DOCX, HTML, Markdown, Excel (`.xlsx`/`.xls`), CSV, common image formats (OCR).
 
-## No Python installed? (one-click)
+## Requirements
 
-See **[installers/README.md](installers/README.md)**:
+- **Python 3.10+** with **tkinter** (the GUI) and **pip**.
+- The Python packages in `requirements.txt`.
+- **Optional** for OCR of scanned PDFs / images: **Tesseract OCR** and **Poppler** as system tools. See [README_STARTING.md](README_STARTING.md).
 
-| Platform | Launcher |
-|----------|----------|
-| **Windows 10/11 (x64)** | `installers\windows\Install and Run.bat` or `INSTALL.bat` — opens an installer wizard on first run |
-| **macOS** | Double-click `installers/macos/Install and Run.command` (after `chmod +x`) |
-| **Linux** | `./installers/linux/install-and-run.sh` |
-
-First run downloads a private runtime and libraries (~200–400 MB). No system Python required on Windows/macOS/Linux installers. On Windows, choices are saved to `installers/runtime/windows/install_state.json`. See [installers/README.md](installers/README.md).
-
-## Developers (Python already installed)
+## Install and run
 
 ```bash
 pip install -r requirements.txt
 python app.py --gui
 ```
 
-Or: `start_gui.bat` (Windows, if Python is on PATH).
+On Windows you can also double-click **`start_gui.bat`** once Python is installed and on PATH.
+
+> Tip: use a virtual environment if you prefer to keep dependencies isolated:
+> ```bash
+> python -m venv .venv
+> .venv\Scripts\activate      # Windows  (or: source .venv/bin/activate)
+> pip install -r requirements.txt
+> python app.py --gui
+> ```
 
 ## Tests
 
@@ -34,8 +36,6 @@ run_tests.bat
 ```
 
 Or: `python -m unittest discover -s tests -v`
-
-Windows installer wizard tests: `installers\windows\tests\Run-InstallerTests.bat`.
 
 Continuous integration runs the same test suite on push (see `.github/workflows/test.yml`).
 
@@ -47,14 +47,13 @@ Continuous integration runs the same test suite on push (see `.github/workflows/
 | `boolean_parser.py`, `nlp_utils.py` | Query parsing, stemming, tokenization |
 | `indexing.py`, `text_extract.py` | Inverted index and full-document extraction |
 | `search_*.py`, `html_search.py`, `text_search.py` | Per-format search |
-| `installers/` | One-click setup (Windows wizard + private runtime on first run) |
 | `tests/` | Unit and integration tests |
 
 ## Documentation
 
 | File | Contents |
 |------|----------|
-| [README_STARTING.md](README_STARTING.md) | Launch, optional Tesseract & Poppler |
+| [README_STARTING.md](README_STARTING.md) | Install, launch, optional Tesseract & Poppler |
 | [QUICK_GUIDE.md](QUICK_GUIDE.md) | Boolean query syntax |
 | [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) | Architecture |
 

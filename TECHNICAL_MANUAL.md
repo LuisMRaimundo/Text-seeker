@@ -49,10 +49,9 @@ text-seeker/
 ├── save_results.py          # HTML/TXT/CSV/Excel export
 ├── indexing.py              # Inverted index (JSON; migrates .docseeker_index)
 ├── performance_optimizer.py # ParallelProcessor, BM25
-├── start_gui.bat            # Windows launcher (dev install)
+├── start_gui.bat            # Windows launcher (Python on PATH)
 ├── run_tests.bat            # unittest runner
 ├── requirements.txt
-├── installers/              # Autonomous one-click setup
 ├── tests/                   # Unit + integration tests
 └── .github/workflows/       # CI
 ```
@@ -102,19 +101,18 @@ See [README_STARTING.md](README_STARTING.md) for platform-specific install steps
 
 ## 3.4 Installation Commands
 
+Use your own Python 3.10+ (with tkinter and pip). Optionally in a virtual environment:
+
 ```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows  (or: source .venv/bin/activate)
 pip install -r requirements.txt
+python app.py --gui
 ```
 
-## 3.5 One-click install (no system Python)
-
-| Platform | Launcher |
-|----------|----------|
-| Windows x64 | `installers/windows/Install and Run.bat` — wizard for Python, packages, Tesseract, Poppler, PATH; state in `installers/runtime/windows/install_state.json` |
-| macOS | `installers/macos/Install and Run.command` |
-| Linux | `installers/linux/install-and-run.sh` |
-
-First run downloads a private runtime under `installers/runtime/` (gitignored). Windows uses the official Python amd64 installer (Tcl/Tk + pip), not embeddable Python. Details: [installers/README.md](installers/README.md), [installers/windows/README.md](installers/windows/README.md).
+OCR of scanned PDFs/images additionally requires the system tools **Tesseract**
+(with the relevant language packs, e.g. `por`, `eng`) and **Poppler**. See
+[README_STARTING.md](README_STARTING.md).
 
 ---
 

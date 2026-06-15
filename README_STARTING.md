@@ -2,19 +2,30 @@
 
 **See also:** [README.md](README.md) · [QUICK_GUIDE.md](QUICK_GUIDE.md) (query syntax) · [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) (architecture)
 
-## Quick Start (no Python required)
+## Quick Start
 
-Use the **one-click installer** — see [installers/README.md](installers/README.md):
+text-seeker runs on your own **Python 3.10+** (with tkinter and pip). Install the
+dependencies once, then launch:
 
-| Platform | Action |
-|----------|--------|
-| Windows 10/11 (x64) | `installers\windows\Install and Run.bat` or `INSTALL.bat` |
-| macOS | `installers/macos/Install and Run.command` |
-| Linux | `./installers/linux/install-and-run.sh` |
+```bash
+pip install -r requirements.txt
+python app.py --gui
+```
 
-On **Windows**, the first run opens an installer wizard where you choose Python, packages, Tesseract, Poppler, and PATH handling. Settings are stored in `installers\runtime\windows\install_state.json`.
+Prefer an isolated environment? Use a virtual environment:
 
-## If Python is already installed
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows  (or: source .venv/bin/activate on macOS/Linux)
+pip install -r requirements.txt
+python app.py --gui
+```
+
+For OCR of scanned PDFs / images, also install **Tesseract** and **Poppler** (see
+[Optional: Tesseract and Poppler](#optional-tesseract-and-poppler) below). For
+Portuguese scans, install the `por` Tesseract language pack.
+
+## Launching the GUI
 
 ### Option 1: Double-click the batch file
 - **`start_gui.bat`** — launches the GUI (uses `pythonw` when available)
@@ -97,11 +108,11 @@ These are **system tools**, not Python packages. **text-seeker works without the
 
 | Platform | Install |
 |----------|---------|
-| **Windows** | Use the installer wizard (private download or point to existing), or [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki). The app also checks `TESSERACT_PATH` and common install paths. |
-| **macOS** | `brew install tesseract` |
-| **Linux** | `sudo apt install tesseract-ocr` (Debian/Ubuntu) or your distro equivalent |
+| **Windows** | [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki) (install the **Portuguese** language pack if you OCR Portuguese scans). The app checks `TESSERACT_PATH` and common install paths. |
+| **macOS** | `brew install tesseract tesseract-lang` |
+| **Linux** | `sudo apt install tesseract-ocr tesseract-ocr-por` (Debian/Ubuntu) or your distro equivalent |
 
-**Custom path:** set environment variable `TESSERACT_PATH` to the full path of `tesseract.exe` (Windows) or the `tesseract` binary.
+**Custom path:** set environment variable `TESSERACT_PATH` to the full path of `tesseract.exe` (Windows) or the `tesseract` binary. **Languages:** OCR uses `por+eng` by default; install the matching Tesseract language packs (e.g. `por`, `eng`).
 
 On startup, the app prints `[OK] Tesseract: …` when found, or a warning if OCR may be unavailable.
 
@@ -111,7 +122,7 @@ Required by `pdf2image` when OCR must render PDF pages to images.
 
 | Platform | Install |
 |----------|---------|
-| **Windows** | Installer wizard (private Poppler zip), [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases), or set `POPPLER_PATH` to the `bin` folder |
+| **Windows** | [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases) — add its `bin` folder to PATH, or set `POPPLER_PATH` to that `bin` folder |
 | **macOS** | `brew install poppler` |
 | **Linux** | `sudo apt install poppler-utils` |
 
@@ -157,7 +168,8 @@ text-seeker/
 ├── search_csv.py             # CSV
 ├── ocr_utils.py              # Tesseract integration
 ├── save_results.py           # Export HTML / TXT / CSV / Excel
-├── installers/               # One-click installers (no system Python)
+├── requirements.txt          # Python dependencies
+├── start_gui.bat             # Windows GUI shortcut (Python on PATH)
 ├── tests/                    # unittest suite
 └── .github/workflows/        # CI (tests on push)
 ```
