@@ -21,6 +21,8 @@ python app.py --gui
 
 On Windows you can also double-click **`start_gui.bat`** once Python is installed and on PATH.
 
+**Windows users:** there is **no automatic installer** — see **[INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)** for step-by-step manual setup of Python, Tesseract and Poppler, with verification and troubleshooting.
+
 > Tip: use a virtual environment if you prefer to keep dependencies isolated:
 > ```bash
 > python -m venv .venv
@@ -53,6 +55,7 @@ Continuous integration runs the same test suite on push (see `.github/workflows/
 
 | File | Contents |
 |------|----------|
+| [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) | Manual Windows 10/11 setup (Python, Tesseract, Poppler) |
 | [README_STARTING.md](README_STARTING.md) | Install, launch, optional Tesseract & Poppler |
 | [QUICK_GUIDE.md](QUICK_GUIDE.md) | Boolean query syntax |
 | [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) | Architecture |
