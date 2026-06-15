@@ -281,6 +281,30 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertIn("sitecustomize.py", cfg)
         self.assertIn("Write-VenvTclSiteCustomize -VenvDir", cfg)
 
+    def test_uninstaller_exists_and_is_scoped(self):
+        bat = WINDOWS / "Uninstall.bat"
+        ps1 = WINDOWS / "uninstall.ps1"
+        self.assertTrue(bat.is_file())
+        self.assertTrue(ps1.is_file())
+        text = ps1.read_text(encoding="utf-8")
+        # Removes the private runtime folder.
+        self.assertIn("installers\\runtime", text)
+        self.assertIn("Remove-Item -LiteralPath $RuntimeRoot -Recurse -Force", text)
+        # Reverses opt-in user PATH entries recorded at install time.
+        self.assertIn("user_path_entries_added", text)
+        self.assertIn("SetEnvironmentVariable('PATH'", text)
+        # Confirms before deleting and never edits app source.
+        self.assertIn("Read-Host", text)
+        self.assertNotIn("Remove-Item -LiteralPath $Root", text)
+
+    def test_venv_dependency_verification(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # After installing requirements, the venv imports are verified and logged.
+        self.assertIn("Venv dependency check", cfg)
+        self.assertIn("find_spec", cfg)
+        self.assertIn("MISSING=", cfg)
+        self.assertIn("VENV_EXE=", cfg)
+
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
         from config import (  # noqa: E402

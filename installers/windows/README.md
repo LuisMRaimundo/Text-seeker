@@ -86,6 +86,16 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | Old ZIP / embed Python errors | Download a fresh ZIP from **main**; delete `installers\runtime\` and reinstall |
 | `Unexpected token` / parse errors in `installer_ui.ps1` | Caused by non-ASCII characters in a `.ps1` file read by Windows PowerShell 5.1. Re-download a fresh ZIP from **main**. |
 
+## Uninstall
+
+Double-click **`Uninstall.bat`** (or run `powershell -ExecutionPolicy Bypass -File uninstall.ps1`). It:
+
+- removes the private runtime at `installers\runtime\` (venv, standalone Python, Tesseract, Poppler, install state, logs);
+- reverses any opt-in user PATH entries added at install time;
+- optionally deletes the app's search index/OCR cache (`%USERPROFILE%\.text-seeker_index`, `.text-seeker_cache`) after a prompt.
+
+App source files are never modified. To reinstall, run **`Install and Run.bat`** again.
+
 ## Developers
 
 If Python 3.10+ with tkinter is already installed:

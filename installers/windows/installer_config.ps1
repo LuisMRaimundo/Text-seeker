@@ -476,6 +476,20 @@ function New-TextSeekerVenv {
         $null = & $venvPy -m pip install -r $Requirements 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed in venv (exit $LASTEXITCODE)." }
         Write-InstallLog 'Python packages installed into project venv.'
+
+        # Verify the key feature imports actually resolve in THIS venv interpreter.
+        $verify = 'import importlib.util as u, sys; mods=["docx","PIL","pytesseract","fitz","bs4","openpyxl","pdf2image","pdfminer","numpy"]; missing=[m for m in mods if u.find_spec(m) is None]; print("VENV_EXE="+sys.executable); print("MISSING="+",".join(missing))'
+        $verifyOut = (& $venvPy -c $verify 2>&1 | Out-String).Trim()
+        Write-InstallLog "Venv dependency check: $verifyOut"
+        if ($verifyOut -match 'MISSING=(.+)$') {
+            $miss = $Matches[1].Trim()
+            if ($miss) {
+                Write-InstallLog "Reinstalling missing venv packages: $miss" 'WARN'
+                $null = & $venvPy -m pip install --no-cache-dir -r $Requirements 2>&1 | Out-String
+                $verifyOut2 = (& $venvPy -c $verify 2>&1 | Out-String).Trim()
+                Write-InstallLog "Venv dependency re-check: $verifyOut2"
+            }
+        }
     }
     # Return ONLY the venv python path (avoid leaking command output into the result).
     return [string]$venvPy
