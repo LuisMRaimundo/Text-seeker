@@ -173,6 +173,21 @@ function Get-DetectedPythonInstallations {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { $candidates += $cmd.Source }
     }
+    # py launcher: enumerate installed interpreters (handles per-user installs not on PATH).
+    $pyLauncher = Get-Command 'py.exe' -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        try {
+            $savedEap = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $launcherOut = & $pyLauncher.Source '-0p' 2>$null
+            $ErrorActionPreference = $savedEap
+            foreach ($line in $launcherOut) {
+                if ("$line" -match '([A-Za-z]:\\[^\r\n]*python\.exe)') {
+                    $candidates += $Matches[1]
+                }
+            }
+        } catch { }
+    }
     $regPaths = @(
         'HKLM:\SOFTWARE\Python\PythonCore',
         'HKCU:\SOFTWARE\Python\PythonCore'
@@ -185,6 +200,17 @@ function Get-DetectedPythonInstallations {
                     $candidates += (Join-Path $installPath 'python.exe')
                 }
             }
+        }
+    }
+    # Standard per-user install locations (official python.org per-user installer target).
+    foreach ($base in @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
+        (Join-Path $env:ProgramFiles 'Python311'),
+        'C:\Python311','C:\Python312','C:\Python310'
+    )) {
+        if ($base -and (Test-Path -LiteralPath $base)) {
+            Get-ChildItem -LiteralPath $base -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 8 | ForEach-Object { $candidates += $_.FullName }
         }
     }
     $private = Join-Path $DefaultPrivatePythonDir 'python.exe'
@@ -277,20 +303,18 @@ function Test-PrivatePythonValid {
     return $ok
 }
 
-function Install-PrivatePythonTo {
-    param([string]$TargetDir)
+function Install-ManagedPython {
+    # Clean-machine route: install the official python.org build in normal per-user
+    # mode (NO fragile custom TargetDir), then locate it via py launcher / per-user
+    # location / registry. The project-local venv -- not this base -- is what we launch.
     Assert-OfficialPythonInstallerUrl -Url $script:PythonInstallerUrl
-    $pyExe = Join-Path $TargetDir 'python.exe'
     $pythonInstallerLog = Join-Path $RuntimeRoot 'python-installer.log'
 
-    # B7: reuse only a complete, valid private Python; otherwise remove stale/partial dir.
-    if (Test-Path -LiteralPath $TargetDir) {
-        if ((Test-Path -LiteralPath $pyExe -PathType Leaf) -and (Test-PrivatePythonValid -PyExe $pyExe)) {
-            Write-InstallLog "Private Python already present and valid: $pyExe"
-            return $pyExe
-        }
-        Write-InstallLog "Removing stale/partial private Python directory: $TargetDir" 'WARN'
-        Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Already have a usable interpreter? Reuse it as the managed base.
+    $existing = Get-DetectedPythonInstallations | Where-Object { $_.Ready } | Select-Object -First 1
+    if ($existing) {
+        Write-InstallLog "Managed Python: reusing existing compatible interpreter $($existing.Path)"
+        return $existing.Path
     }
 
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
@@ -300,13 +324,11 @@ function Install-PrivatePythonTo {
     if (-not (Test-Path -LiteralPath $installerPath)) {
         throw "Python installer download failed (no file at $installerPath)."
     }
-    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 
-    # B3/B4: explicit argument array (no fragile string interpolation).
-    # Per-user, no admin, no system PATH. Core components stay enabled.
+    # Normal per-user install (default location). Argument array, not interpolation.
     $pyArgs = @(
         '/quiet'
-        "/log"
+        '/log'
         "$pythonInstallerLog"
         'InstallAllUsers=0'
         'PrependPath=0'
@@ -316,82 +338,79 @@ function Install-PrivatePythonTo {
         'Include_lib=1'
         'Include_pip=1'
         'Include_tcltk=1'
-        'Include_launcher=0'
+        'Include_launcher=1'
         'InstallLauncherAllUsers=0'
         'Include_test=0'
         'Include_doc=0'
-        "TargetDir=$TargetDir"
     )
-
-    # B6: log everything needed to diagnose a failed install.
     Write-InstallLog "Python installer path: $installerPath"
     Write-InstallLog ("Python installer args: " + ($pyArgs -join ' '))
-    Write-InstallLog "Expected TargetDir: $TargetDir"
-    Write-InstallLog "Expected python.exe: $pyExe"
     Write-InstallLog "Python installer log: $pythonInstallerLog"
-
     $proc = Start-Process -FilePath $installerPath -ArgumentList $pyArgs -Wait -PassThru
     Write-InstallLog "Python installer exit code: $($proc.ExitCode)"
-    # 0 = success, 3010 = success but reboot requested.
     if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
         throw "Python installer failed (exit $($proc.ExitCode)). See log: $pythonInstallerLog"
     }
 
-    # Wait for python.exe at the target (installer can finish asynchronously).
-    if (-not (Wait-ForFile -Path $pyExe -TimeoutSeconds 90)) {
-        Write-InstallLog "python.exe not at expected target yet; searching private runtime area." 'WARN'
-
-        # B8: search ONLY within the private runtime area for a usable interpreter.
-        $located = Find-PythonExeUnder -Root $RuntimeRoot
-        if ($located) {
-            Write-InstallLog "Found private python.exe candidate: $located"
-            $pyExe = $located
-        }
-
-        # Per-user default location is logged as DIAGNOSTIC only -- never used silently (B8/B9).
+    # Locate the freshly installed interpreter (may finish asynchronously).
+    $base = $null
+    for ($i = 0; $i -lt 60; $i++) {
+        $cand = Get-DetectedPythonInstallations | Where-Object { $_.Ready } | Select-Object -First 1
+        if ($cand) { $base = $cand.Path; break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $base) {
         $verNoDots = ($PythonVersion -split '\.')[0..1] -join ''
-        foreach ($diag in @(
+        foreach ($p in @(
             (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots\python.exe"),
             (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots-32\python.exe")
         )) {
-            if (Test-Path -LiteralPath $diag -PathType Leaf) {
-                Write-InstallLog "DIAGNOSTIC: a Python exists at $diag (not used; private install expected under $TargetDir). The official installer likely repaired an existing install instead of installing to TargetDir." 'WARN'
+            if (Test-Path -LiteralPath $p -PathType Leaf) {
+                $chk = Test-PythonCandidate -ExePath $p
+                if ($chk.Ready) { $base = $p; break }
             }
         }
-
-        if (-not (Test-Path -LiteralPath $pyExe -PathType Leaf)) {
-            throw "Private Python installation did not produce python.exe under $RuntimeRoot. If Python $PythonVersion is already installed on this PC, the official installer may have repaired it in place. Choose 'Use detected system Python' instead, or uninstall the existing Python and retry. See log: $pythonInstallerLog"
-        }
     }
-
-    # B10: full validation of the private interpreter.
-    if (-not (Test-PrivatePythonValid -PyExe $pyExe)) {
-        $check = Test-PythonCandidate -ExePath $pyExe
-        throw "Private Python installed but failed validation ($($check.Reason)). See log: $pythonInstallerLog"
+    if (-not $base) {
+        throw "Managed Python installed (exit $($proc.ExitCode)) but no usable interpreter was located (py launcher / per-user / registry). See log: $pythonInstallerLog"
     }
-    Write-InstallLog "Private Python ready: $pyExe"
-    return $pyExe
+    Write-InstallLog "Managed Python base interpreter: $base"
+    return $base
 }
 
-function Install-PythonPackagesTo {
-    param([string]$PyExe, [string]$VenvDir = $null)
-    if (-not (Test-Path -LiteralPath $Requirements)) { throw "Missing requirements.txt at $Requirements" }
-    $pipPy = $PyExe
-    if ($VenvDir) {
-        Write-InstallLog "Creating virtual environment at $VenvDir"
-        if (-not (Test-Path -LiteralPath $VenvDir)) {
-            & $PyExe -m venv $VenvDir
-            if ($LASTEXITCODE -ne 0) { throw "venv creation failed (exit $LASTEXITCODE)." }
+function New-TextSeekerVenv {
+    # Always create a project-local venv and install requirements into it.
+    param([string]$BasePython, [string]$VenvDir, [bool]$InstallPackages = $true)
+    $venvPy = Join-Path $VenvDir 'Scripts\python.exe'
+
+    if ((Test-Path -LiteralPath $venvPy -PathType Leaf) -and (Test-PrivatePythonValid -PyExe $venvPy)) {
+        Write-InstallLog "Reusing existing project venv: $venvPy"
+    } else {
+        if (Test-Path -LiteralPath $VenvDir) {
+            Write-InstallLog "Removing stale venv: $VenvDir" 'WARN'
+            Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
         }
-        $pipPy = Join-Path $VenvDir 'Scripts\python.exe'
+        Write-InstallLog "Creating project-local venv at $VenvDir (base: $BasePython)"
+        & $BasePython -m venv $VenvDir
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
+            throw "Failed to create virtual environment at $VenvDir (base Python: $BasePython)."
+        }
     }
-    Write-InstallLog 'Installing Python packages (may take 10-20 minutes)...'
-    & $pipPy -m pip install --upgrade pip wheel setuptools
-    if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)." }
-    & $pipPy -m pip install -r $Requirements
-    if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)." }
-    Write-InstallLog 'Python packages installed.'
-    return $pipPy
+
+    if (-not (Test-PrivatePythonValid -PyExe $venvPy)) {
+        throw "Project venv Python failed validation (sys/pip/tkinter): $venvPy"
+    }
+
+    if ($InstallPackages) {
+        if (-not (Test-Path -LiteralPath $Requirements)) { throw "Missing requirements.txt at $Requirements" }
+        Write-InstallLog 'Installing Python packages into project venv (may take 10-20 minutes)...'
+        & $venvPy -m pip install --upgrade pip wheel setuptools
+        if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed in venv (exit $LASTEXITCODE)." }
+        & $venvPy -m pip install -r $Requirements
+        if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed in venv (exit $LASTEXITCODE)." }
+        Write-InstallLog 'Python packages installed into project venv.'
+    }
+    return $venvPy
 }
 
 function Install-PrivateTesseractTo {
@@ -486,15 +505,15 @@ function Save-InstallState {
 }
 
 function Get-DefaultInstallChoices {
+    # Clean-machine default: managed Python. If a compatible Python is detected,
+    # default to using it. Custom is never a default and never points at C:\Python.
     $detectedPy = Get-DetectedPythonInstallations | Where-Object { $_.Ready } | Select-Object -First 1
-    $pyMode = if ($detectedPy) { 'system' } else { 'private' }
+    $pyMode = if ($detectedPy) { 'detected' } else { 'managed' }
     return [ordered]@{
         PythonMode = $pyMode
-        PythonPath = if ($detectedPy) { $detectedPy.Path } else { (Join-Path $DefaultPrivatePythonDir 'python.exe') }
-        UseVenvForSystemPython = $true
+        PythonPath = if ($detectedPy) { $detectedPy.Path } else { '' }
         VenvDir = $DefaultVenvDir
         InstallPackages = $true
-        PrivatePythonDir = $DefaultPrivatePythonDir
         TesseractMode = 'private'
         TesseractPath = (Join-Path $DefaultPrivateTesseractDir 'tesseract.exe')
         PrivateTesseractDir = $DefaultPrivateTesseractDir
@@ -545,80 +564,100 @@ function Invoke-InstallerRun {
     Write-InstallLog '=== text-seeker Windows installer started ==='
     if ($Choices.RemoveLegacyEmbed) { Remove-LegacyEmbedRuntime | Out-Null }
 
-    $pyExe = $null
-    $venvDir = $null
+    # --- Resolve the BASE Python by mode (never validate C:\Python in managed mode) ---
+    $basePy = $null
+    $pyModeState = 'managed_installed'
     switch ($Choices.PythonMode) {
-        'system' {
+        'detected' {
             $check = Test-PythonCandidate -ExePath $Choices.PythonPath
-            if (-not $check.Ready) { throw "Selected system Python is not usable. $($check.Reason)" }
-            $pyExe = $check.Path
-            if ($Choices.UseVenvForSystemPython) { $venvDir = $Choices.VenvDir }
+            if (-not $check.Ready) {
+                throw "Selected Python is not valid. Choose a valid python.exe or select managed Python install. ($($check.Reason))"
+            }
+            $basePy = $check.Path
+            $pyModeState = 'detected_existing'
         }
         'custom' {
             $check = Test-PythonCandidate -ExePath $Choices.PythonPath
-            if (-not $check.Ready) { throw "Custom Python is not usable. $($check.Reason)" }
-            $pyExe = $check.Path
+            if (-not $check.Ready) {
+                throw "Selected Python is not valid. Choose a valid python.exe or select managed Python install. ($($check.Reason))"
+            }
+            $basePy = $check.Path
+            $pyModeState = 'custom'
         }
         default {
-            $pyExe = Install-PrivatePythonTo -TargetDir $Choices.PrivatePythonDir
+            # 'managed' (and any legacy value) -> install/locate a managed base Python.
+            $basePy = Install-ManagedPython
+            $pyModeState = 'managed_installed'
         }
     }
 
-    $launchPy = $pyExe
-    if ($Choices.InstallPackages) {
-        $launchPy = Install-PythonPackagesTo -PyExe $pyExe -VenvDir $venvDir
-    }
+    # --- Always build a project-local venv and launch from it (hard requirement) ---
+    $venvPy = New-TextSeekerVenv -BasePython $basePy -VenvDir $Choices.VenvDir -InstallPackages ([bool]$Choices.InstallPackages)
+    $launchPy = $venvPy
 
+    # --- Tesseract (warning-only) ---
     $tessExe = $null
+    $tessModeState = 'missing'
     switch ($Choices.TesseractMode) {
-        'detected' { $tessExe = Find-TesseractInPath }
-        'custom' { $tessExe = $Choices.TesseractPath }
-        'private' { $tessExe = Install-PrivateTesseractTo -TargetDir $Choices.PrivateTesseractDir }
-        'skip' { $tessExe = $null }
+        'detected' { $tessExe = Find-TesseractInPath; $tessModeState = 'detected' }
+        'custom' { $tessExe = $Choices.TesseractPath; $tessModeState = 'detected' }
+        'private' { $tessExe = Install-PrivateTesseractTo -TargetDir $Choices.PrivateTesseractDir; $tessModeState = 'private_installed' }
+        'skip' { $tessExe = $null; $tessModeState = 'skipped' }
     }
     if ($Choices.TesseractMode -ne 'skip' -and (-not $tessExe -or -not (Test-Path -LiteralPath $tessExe))) {
         Write-InstallLog 'Tesseract unavailable; OCR for scanned images may not work.' 'WARN'
         $tessExe = $null
+        $tessModeState = 'missing'
     }
 
+    # --- Poppler (warning-only) ---
     $popBin = $null
+    $popModeState = 'missing'
     switch ($Choices.PopplerMode) {
-        'detected' { $popBin = Find-PopplerBinInPath }
-        'custom' { $popBin = $Choices.PopplerBin }
-        'private' { $popBin = Install-PrivatePopplerTo -TargetRoot $Choices.PrivatePopplerDir }
-        'skip' { $popBin = $null }
+        'detected' { $popBin = Find-PopplerBinInPath; $popModeState = 'detected' }
+        'custom' { $popBin = $Choices.PopplerBin; $popModeState = 'detected' }
+        'private' { $popBin = Install-PrivatePopplerTo -TargetRoot $Choices.PrivatePopplerDir; $popModeState = 'private_installed' }
+        'skip' { $popBin = $null; $popModeState = 'skipped' }
     }
     if ($Choices.PopplerMode -ne 'skip' -and (-not $popBin -or -not (Test-Path -LiteralPath (Join-Path $popBin 'pdftotext.exe')))) {
         Write-InstallLog 'Poppler unavailable; scanned-PDF conversion may not work.' 'WARN'
         $popBin = $null
+        $popModeState = 'missing'
     }
 
     $tessOk = [bool]($tessExe -and (Test-Path -LiteralPath $tessExe))
     $popOk = [bool]($popBin -and (Test-Path -LiteralPath (Join-Path $popBin 'pdftotext.exe')))
     $ocrTag = Get-OcrCapabilityTag -TessOk $tessOk -PopOk $popOk
     $userAdded = Apply-UserPathPolicy -Choices $Choices -PyExe $launchPy -TessExe $tessExe -PopBin $popBin
+    $pathPolicyState = if ($userAdded.Count -gt 0) { 'user_path_opt_in' } else { 'process_local' }
+
+    # gui_ready depends ONLY on Python/venv (tkinter/pip/packages), never on OCR tools.
+    $guiReady = [bool](Test-PrivatePythonValid -PyExe $launchPy)
 
     $state = [ordered]@{
         installer_version = $script:InstallerVersion
         install_timestamp = (Get-Date).ToUniversalTime().ToString('o')
-        python_mode = $Choices.PythonMode
-        python_path = $launchPy
-        python_scripts_path = if ($venvDir) { Join-Path $venvDir 'Scripts' } else { Join-Path (Split-Path -Parent $launchPy) 'Scripts' }
-        venv_path = if ($venvDir) { $venvDir } else { '' }
+        python_mode = $pyModeState
+        base_python_path = $basePy
+        venv_python_path = $launchPy
+        python_path = $launchPy           # legacy alias = launch python
+        python_scripts_path = Join-Path (Split-Path -Parent $launchPy) ''
+        venv_path = $Choices.VenvDir
         packages_installed = [bool]$Choices.InstallPackages
-        tesseract_mode = $Choices.TesseractMode
+        tesseract_mode = $tessModeState
         tesseract_path = if ($tessExe) { $tessExe } else { '' }
-        poppler_mode = $Choices.PopplerMode
-        poppler_bin = if ($popBin) { $popBin } else { '' }
-        path_policy = $Choices.PathPolicy
+        poppler_mode = $popModeState
+        poppler_bin_path = if ($popBin) { $popBin } else { '' }
+        poppler_bin = if ($popBin) { $popBin } else { '' }   # legacy alias
+        path_policy = $pathPolicyState
         user_path_modified = ($userAdded.Count -gt 0)
         user_path_entries_added = @($userAdded)
-        private_python_dir = $Choices.PrivatePythonDir
         private_tesseract_dir = $Choices.PrivateTesseractDir
         private_poppler_dir = $Choices.PrivatePopplerDir
         runtime_root = $RuntimeRoot
         ocr_capability = $ocrTag
-        gui_can_launch = $true
+        gui_ready = $guiReady
+        gui_can_launch = $guiReady        # legacy alias
         text_search_available = $true
     }
     Save-InstallState -State $state

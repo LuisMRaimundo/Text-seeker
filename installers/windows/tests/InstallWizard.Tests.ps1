@@ -60,17 +60,18 @@ $back = Move-InstallerWizardStep -CurrentStep 6 -Direction 'Back'
 Assert-Equals 5 $back.Step 'Back from Review goes to PATH step'
 
 $choices = @{
-    PythonMode = 'private'
-    PythonPath = 'C:\test\python.exe'
+    PythonMode = 'managed'
+    PythonPath = ''
     InstallPackages = $true
     TesseractMode = 'skip'
     PopplerMode = 'private'
     PathPolicy = 'process_local'
-    PrivatePythonDir = 'C:\test\python'
+    VenvDir = 'C:\test\venv'
 }
 $summary = New-InstallerWizardSummaryText -Choices $choices -LogPath 'C:\test\install.log'
-Assert-True ($summary -match 'Python mode: private') 'Summary includes Python mode'
+Assert-True ($summary -match 'Python mode: managed') 'Summary includes Python mode'
 Assert-True ($summary -match 'PATH policy: process_local') 'Summary includes PATH policy'
+Assert-True ($summary -match 'Project venv:') 'Summary includes project venv'
 
 # Guard: installer_ui.ps1 must use script-scoped WizardStep (regression for stuck Next button)
 $uiText = Get-Content -LiteralPath (Join-Path $windowsDir 'installer_ui.ps1') -Raw
@@ -106,23 +107,23 @@ try {
     # Default choices must never default Python to a bare 'C:\Python'.
     $defaults = Get-DefaultInstallChoices
     Assert-True ($defaults.PythonPath -ne 'C:\Python') 'Default PythonPath is not C:\Python'
-    Assert-True ($defaults.PythonMode -in @('system', 'private')) 'Default PythonMode is system or private'
-    if ($defaults.PythonMode -eq 'private') {
-        Assert-True ($defaults.PythonPath -like '*runtime*windows*python*') 'Private default Python is under the private runtime'
+    Assert-True ($defaults.PythonMode -in @('detected', 'managed')) 'Default PythonMode is detected or managed'
+    if ($defaults.PythonMode -eq 'managed') {
+        Assert-Equals '' $defaults.PythonPath 'Managed default has empty custom path'
     }
 } finally {
     Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# Python step gating: private never blocks; invalid custom/system blocks with a clear message.
-Assert-True ($null -eq (Get-PythonStepBlockReason -Mode 'private' -CandidateReady $false)) 'Private mode never blocks Next'
+# Python step gating: managed never blocks; invalid custom/detected blocks with a clear message.
+Assert-True ($null -eq (Get-PythonStepBlockReason -Mode 'managed' -CandidateReady $false)) 'Managed mode never blocks Next'
 Assert-True ($null -eq (Get-PythonStepBlockReason -Mode 'custom' -CandidateReady $true)) 'Ready custom Python does not block Next'
 $blk = Get-PythonStepBlockReason -Mode 'custom' -CandidateReady $false -CandidateReason 'Missing/incompatible: tkinter'
 Assert-True ($blk -match 'not valid') 'Invalid custom Python blocks with clear message'
-Assert-True ($blk -match 'Install private Python') 'Block message guides to private Python'
+Assert-True ($blk -match 'managed Python install') 'Block message guides to managed Python'
 Assert-True ($blk -match 'tkinter') 'Block message includes the failing check detail'
-$blkSys = Get-PythonStepBlockReason -Mode 'system' -CandidateReady $false -CandidateReason 'no pip'
-Assert-True ($blkSys -match 'not valid') 'Invalid system Python also blocks'
+$blkDet = Get-PythonStepBlockReason -Mode 'detected' -CandidateReady $false -CandidateReason 'no pip'
+Assert-True ($blkDet -match 'not valid') 'Invalid detected Python also blocks'
 
 # Windows Store alias stubs must be rejected, not probed.
 $storeStub = 'C:\Users\x\AppData\Local\Microsoft\WindowsApps\python3.exe'
@@ -134,37 +135,20 @@ $threw = $false
 try { $null = Get-DetectedPythonInstallations } catch { $threw = $true }
 Assert-True (-not $threw) 'Get-DetectedPythonInstallations does not throw under Stop'
 
-# Private-install helpers: locate python.exe (incl. nested) and wait for a file.
-$tmp2 = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-pyfind-" + [System.Guid]::NewGuid().ToString('N'))
-$nested = Join-Path $tmp2 'tools'
-New-Item -ItemType Directory -Force -Path $nested | Out-Null
-$nestedExe = Join-Path $nested 'python.exe'
-Set-Content -LiteralPath $nestedExe -Value '' -Encoding ASCII
-try {
-    Assert-Equals $nestedExe (Find-PythonExeUnder -Root $tmp2) 'Find-PythonExeUnder locates nested python.exe'
-    Assert-True (Wait-ForFile -Path $nestedExe -TimeoutSeconds 2) 'Wait-ForFile returns true for existing file'
-    Assert-True (-not (Wait-ForFile -Path (Join-Path $tmp2 'nope.exe') -TimeoutSeconds 1)) 'Wait-ForFile returns false for missing file'
-} finally {
-    Remove-Item -LiteralPath $tmp2 -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Regression: do not use the PowerShell automatic variable $args for installer args.
+# Managed-install / venv strategy in installer_config.ps1.
 $cfgText = Get-Content -LiteralPath (Join-Path $windowsDir 'installer_config.ps1') -Raw
 Assert-True ($cfgText -notmatch '\$args\s*=') 'installer_config.ps1 does not assign to automatic $args'
-Assert-True ($cfgText -match 'Find-PythonExeUnder') 'installer_config.ps1 has python.exe locate fallback'
-
-# Private Python installer argument strategy.
-Assert-True ($cfgText -match '\$pyArgs = @\(') 'Python installer uses an argument array'
-foreach ($tok in @('TargetDir=$TargetDir','Include_exe=1','Include_lib=1','Include_pip=1','Include_tcltk=1','PrependPath=0','InstallAllUsers=0','/log')) {
-    Assert-True ($cfgText -match [regex]::Escape($tok)) "Python installer args include $tok"
+Assert-True ($cfgText -match 'function Install-ManagedPython') 'Has Install-ManagedPython'
+Assert-True ($cfgText -match 'function New-TextSeekerVenv') 'Has New-TextSeekerVenv'
+Assert-True ($cfgText -match '\$pyArgs = @\(') 'Managed install uses an argument array'
+foreach ($tok in @('Include_exe=1','Include_lib=1','Include_pip=1','Include_tcltk=1','PrependPath=0','InstallAllUsers=0','/log')) {
+    Assert-True ($cfgText -match [regex]::Escape($tok)) "Managed install args include $tok"
 }
+Assert-True ($cfgText -match 'm venv') 'Creates a project-local venv'
+Assert-True ($cfgText -match 'import sys, pip, tkinter') 'venv Python validated end to end'
+Assert-True ($cfgText -match 'gui_ready = \$guiReady') 'install_state records gui_ready from venv validation'
 
-# Per-user location is diagnostic-only; private search scoped to runtime root.
-Assert-True ($cfgText -match 'DIAGNOSTIC') 'Per-user Python location is logged as diagnostic'
-Assert-True ($cfgText -match 'Find-PythonExeUnder -Root \$RuntimeRoot') 'Private search is scoped to the runtime root'
-Assert-True ($cfgText -match 'import sys, pip, tkinter') 'Private Python validated end to end'
-
-# Validation must run end to end and not silently accept a per-user interpreter.
+# venv validation helper returns false for a missing interpreter.
 $tmp3 = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-validpy-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmp3 | Out-Null
 try {

@@ -29,7 +29,7 @@ Runtime data (not in Git): `installers\runtime\windows\` — Python, tools, `ins
 
 | Component | Options |
 |-----------|---------|
-| **Python** | Use detected system Python (venv for packages), install private Python (official amd64 + Tcl/Tk), or custom path. Custom accepts a `python.exe` **or its folder**; it is validated for Python 3.10+, pip, and tkinter before continuing. Windows Store alias stubs are rejected. |
+| **Python** | **Recommended (default on a clean PC): Install managed Python** and build the Text-seeker environment; **Use detected compatible Python** (3.10+, pip, tkinter); or **Advanced: custom** `python.exe`/folder. Text-seeker **always runs in a project-local virtual environment** at `installers\runtime\windows\venv`. Custom is validated (3.10+, pip, tkinter) before continuing; Windows Store alias stubs are rejected. |
 | **Packages** | Install `requirements.txt` into the chosen environment |
 | **Tesseract** | Install private, use detected, custom path, or skip |
 | **Poppler** | Install private, use detected, custom bin folder, or skip |
@@ -78,7 +78,8 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | Installer cancelled | Re-run **Install and Run.bat** |
 | Setup failed on Python/packages | Check log; Python/tkinter/pip/packages are hard requirements |
 | "Custom Python is not usable" | Point Custom Python at a real `python.exe` (or the folder containing it) with Python 3.10+, pip, and tkinter |
-| "python.exe not found" after private install | If Python 3.11.9 is already installed on the PC, the official installer may repair it in place and ignore the private `TargetDir`. The installer reports this clearly (and logs the existing per-user Python as a diagnostic, without using it). Either choose **Use detected system Python**, or uninstall the existing Python and retry. See `installers\runtime\windows\python-installer.log`. |
+| Clean machine (no Python/Tesseract/Poppler) | Choose **Install managed Python** (default). It installs the official python.org build in normal per-user mode, locates it (py launcher / per-user / registry), then builds the project venv. Tesseract/Poppler are installed if possible; failures are warnings only. |
+| Managed Python not located after install | See `installers\runtime\windows\python-installer.log`. If a Python is already installed, choose **Use detected compatible Python** instead. The launch interpreter is always the venv at `installers\runtime\windows\venv\Scripts\python.exe`. |
 | Tesseract/Poppler failed | Warning only — GUI still runs; OCR features limited |
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |

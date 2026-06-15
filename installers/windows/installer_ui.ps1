@@ -24,25 +24,33 @@ function Show-ConsoleInstallerWizard {
     } else {
         Write-Host '  No compatible system Python detected.'
     }
-    Write-Host 'Python mode:'
-    Write-Host '  1 = Use detected system Python (venv for packages)'
-    Write-Host '  2 = Install private Python (recommended if none detected)'
-    Write-Host '  3 = Custom python.exe path'
-    $pm = Read-Host 'Choice [1-3] (default 2)'
+    $hasReady = @($detected | Where-Object { $_.Ready }).Count -gt 0
+    Write-Host 'Python mode (Text-seeker always runs in a project-local venv):'
+    Write-Host '  1 = Recommended: Install managed Python and create the Text-seeker environment'
+    Write-Host '  2 = Use detected compatible Python'
+    Write-Host '  3 = Advanced: custom python.exe path (or its folder)'
+    $defaultChoice = if ($hasReady) { '2' } else { '1' }
+    $pm = Read-Host "Choice [1-3] (default $defaultChoice)"
+    if (-not $pm) { $pm = $defaultChoice }
     switch ($pm) {
-        '1' {
-            $choices.PythonMode = 'system'
-            if ($detected.Count -eq 0) { throw 'No system Python detected.' }
-            $idx = Read-Host 'Enter index of Python to use'
-            $choices.PythonPath = $detected[[int]$idx].Path
-            $choices.UseVenvForSystemPython = $true
+        '2' {
+            $choices.PythonMode = 'detected'
+            $ready = @($detected | Where-Object { $_.Ready })
+            if ($ready.Count -eq 0) { throw "No compatible Python detected. Re-run and choose 1 (managed install)." }
+            if ($ready.Count -eq 1) {
+                $choices.PythonPath = $ready[0].Path
+            } else {
+                $idx = Read-Host 'Enter index of Python to use'
+                $choices.PythonPath = $detected[[int]$idx].Path
+            }
         }
         '3' {
             $choices.PythonMode = 'custom'
             $choices.PythonPath = Read-Host 'Full path to python.exe (or the folder containing it)'
         }
         default {
-            $choices.PythonMode = 'private'
+            $choices.PythonMode = 'managed'
+            $choices.PythonPath = ''
         }
     }
 
@@ -92,9 +100,7 @@ function Show-ConsoleInstallerWizard {
     }
 
     Write-Host ''
-    Write-Host 'Private install folders (Enter = defaults):'
-    $ppd = Read-Host "Python dir [$($choices.PrivatePythonDir)]"
-    if ($ppd) { $choices.PrivatePythonDir = $ppd }
+    Write-Host 'Private tool folders (Enter = defaults):'
     $ptd = Read-Host "Tesseract dir [$($choices.PrivateTesseractDir)]"
     if ($ptd) { $choices.PrivateTesseractDir = $ptd }
     $pbd = Read-Host "Poppler dir [$($choices.PrivatePopplerDir)]"
@@ -103,6 +109,7 @@ function Show-ConsoleInstallerWizard {
     Write-Host ''
     Write-Host 'Summary:'
     Write-Host "  Python mode: $($choices.PythonMode)"
+    Write-Host "  Venv:        $($choices.VenvDir)"
     Write-Host "  Tesseract:   $($choices.TesseractMode)"
     Write-Host "  Poppler:     $($choices.PopplerMode)"
     Write-Host "  PATH policy: $($choices.PathPolicy)"
@@ -209,22 +216,24 @@ function Show-WinFormsInstallerWizard {
             1 {
                 $y = 10
                 Add-Label 'Python environment' 10 $y 560 24 $true
-                $y += 35
-                $script:rbPrivate = Add-Radio 'Install private Python (official installer, Tcl/Tk + pip)' 10 $y ($choices.PythonMode -eq 'private'); $y += 28
-                $script:rbSystem = Add-Radio 'Use detected system Python (packages into local venv)' 10 $y ($choices.PythonMode -eq 'system'); $y += 28
-                $script:rbCustom = Add-Radio 'Use custom python.exe path' 10 $y ($choices.PythonMode -eq 'custom'); $y += 35
+                $y += 32
+                Add-Label 'Text-seeker always runs in a project-local virtual environment.' 10 $y 560 32
+                $y += 34
+                $script:rbManaged = Add-Radio 'Recommended: Install managed Python and create the Text-seeker environment' 10 $y ($choices.PythonMode -eq 'managed'); $y += 28
+                $script:rbDetected = Add-Radio 'Use detected compatible Python (3.10+, pip, tkinter)' 10 $y ($choices.PythonMode -eq 'detected'); $y += 28
+                $script:rbCustom = Add-Radio 'Advanced: Choose custom Python (python.exe or its folder)' 10 $y ($choices.PythonMode -eq 'custom'); $y += 32
                 $script:lstPython = New-Object System.Windows.Forms.ListBox
                 $script:lstPython.Location = New-Object System.Drawing.Point(10, $y)
-                $script:lstPython.Size = New-Object System.Drawing.Size(560, 100)
+                $script:lstPython.Size = New-Object System.Drawing.Size(560, 90)
                 foreach ($d in (Get-DetectedPythonInstallations)) {
                     $tag = if ($d.Ready) { 'OK' } else { 'needs 3.10+/pip/tkinter' }
                     [void]$script:lstPython.Items.Add("$($d.Path)  [$tag]")
                 }
                 $panel.Controls.Add($script:lstPython)
-                $y += 110
-                Add-Label 'Custom python.exe (or its folder) - select "Use custom python.exe path" first:' 10 $y 540 20; $y += 22
+                $y += 100
+                Add-Label 'Custom python.exe (or its folder) - only for the Advanced option:' 10 $y 540 20; $y += 22
                 $customDefault = ''
-                if ($choices.PythonMode -eq 'custom' -or $choices.PythonMode -eq 'system') {
+                if ($choices.PythonMode -eq 'custom' -or $choices.PythonMode -eq 'detected') {
                     # Only prefill if it is a real file/folder, never a placeholder like C:\Python.
                     if ($choices.PythonPath -and (Test-Path -LiteralPath $choices.PythonPath)) {
                         $customDefault = $choices.PythonPath
@@ -245,9 +254,6 @@ function Show-WinFormsInstallerWizard {
                     }
                 })
                 $panel.Controls.Add($btnBrowsePy)
-                $y += 35
-                Add-Label 'Private Python folder:' 10 $y 160 20; $y += 22
-                $script:txtPrivatePyDir = Add-TextBox $choices.PrivatePythonDir 170 $y 400
             }
             2 {
                 $y = 10
@@ -346,19 +352,20 @@ function Show-WinFormsInstallerWizard {
     function Save-StepChoices {
         switch ($script:WizardStep) {
             1 {
-                if ($script:rbSystem.Checked) {
-                    $choices.PythonMode = 'system'
+                if ($script:rbDetected.Checked) {
+                    $choices.PythonMode = 'detected'
                     if ($script:lstPython.SelectedIndex -ge 0) {
                         $choices.PythonPath = (Get-DetectedPythonInstallations)[$script:lstPython.SelectedIndex].Path
+                    } elseif ($script:txtCustomPy.Text.Trim()) {
+                        $choices.PythonPath = $script:txtCustomPy.Text.Trim()
                     }
-                    $choices.UseVenvForSystemPython = $true
                 } elseif ($script:rbCustom.Checked) {
                     $choices.PythonMode = 'custom'
                     $choices.PythonPath = $script:txtCustomPy.Text.Trim()
                 } else {
-                    $choices.PythonMode = 'private'
+                    $choices.PythonMode = 'managed'
+                    $choices.PythonPath = ''
                 }
-                $choices.PrivatePythonDir = $script:txtPrivatePyDir.Text.Trim()
             }
             2 { $choices.InstallPackages = $script:chkPackages.Checked }
             3 {
@@ -388,7 +395,7 @@ function Show-WinFormsInstallerWizard {
     function Test-CanLeaveCurrentStep {
         # Validate the Python step before advancing. Private mode is never blocked here.
         if ($script:WizardStep -ne 1) { return $true }
-        if ($choices.PythonMode -eq 'private') { return $true }
+        if ($choices.PythonMode -eq 'managed') { return $true }
 
         $check = Test-PythonCandidate -ExePath $choices.PythonPath
         $reason = Get-PythonStepBlockReason -Mode $choices.PythonMode -CandidateReady $check.Ready -CandidateReason $check.Reason
