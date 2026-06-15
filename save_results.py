@@ -186,23 +186,17 @@ def _highlight_context_html(context: str, terms: Iterable[str]) -> str:
     if not terms_list:
         return html.escape(raw)
     
-    # Paleta de cores para cada termo (cores distintas e acessíveis)
+    # Soft pastel palette (light, readable; distinct per term). Dark text is applied
+    # via the .highlight CSS class so these backgrounds stay legible in both themes.
     color_palette = [
-        "#fff59d",  # Pale yellow
-        "#ffcc80",  # Orange
-        "#f48fb1",  # Pink
-        "#90caf9",  # Light blue
-        "#a5d6a7",  # Light green
-        "#ce93d8",  # Light purple
-        "#ffab91",  # Light red-orange
-        "#b0bec5",  # Light blue-gray
-        "#ffe082",  # Amber
-        "#c5e1a5",  # Light lime
-        "#b39ddb",  # Light indigo
-        "#ef9a9a",  # Light red
-        "#81c784",  # Green
-        "#64b5f6",  # Blue
-        "#ffb74d",  # Deep orange
+        "#fff3b0",  # pale yellow
+        "#d8f3dc",  # pale green
+        "#dbeafe",  # pale blue
+        "#fde2e4",  # pale pink
+        "#f3e8ff",  # pale lavender
+        "#ffe5d9",  # pale peach
+        "#e0f2fe",  # pale cyan
+        "#fef9c3",  # light cream
     ]
     
     # Mapear cada termo para uma cor
@@ -513,12 +507,12 @@ def save_results(
 *{box-sizing:border-box}
 :root{
   --bg:#ffffff; --panel:#f7f7f9; --text:#111827; --muted:#58606b;
-  --border:#e5e7eb; --accent:#16a34a; --hi:#fff59d;
+  --border:#e5e7eb; --accent:#16a34a; --hi:#fff3b0; --hi-text:#111827;
 }
 @media (prefers-color-scheme: dark){
   :root{
     --bg:#0b0c10; --panel:#111827; --text:#e5e7eb; --muted:#9aa4b2;
-    --border:#2a2f3a; --accent:#22c55e; --hi:#4b5563;
+    --border:#2a2f3a; --accent:#22c55e; --hi:#fef9c3; --hi-text:#111827;
   }
 }
 html,body{height:100%}
@@ -552,8 +546,9 @@ body{
 }
 
 .highlight{
-  padding:0 2px; border-radius:3px; font-weight:600;
-  text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px;
+  padding:0 2px; border-radius:3px;
+  color:var(--hi-text);                         /* dark text keeps pastels readable */
+  border-bottom:1px solid rgba(0,0,0,0.15);     /* subtle, not aggressive */
 }
 /* Cor padrão (fallback) - será sobrescrita por inline styles quando especificado */
 .highlight:not([style*="background-color"]) {
