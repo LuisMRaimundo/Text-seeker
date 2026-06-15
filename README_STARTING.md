@@ -1,6 +1,8 @@
 # How to Start text-seeker
 
-**See also:** [README.md](README.md) · [QUICK_GUIDE.md](QUICK_GUIDE.md) (query syntax) · [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) (architecture)
+**See also:** [README.md](README.md) · [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) (manual Windows setup) · [QUICK_GUIDE.md](QUICK_GUIDE.md) (query syntax) · [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) (architecture)
+
+> **Windows:** there is no automatic installer. For full step-by-step setup of Python, Tesseract and Poppler (with verification and troubleshooting), see **[INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)**.
 
 ## Quick Start
 
