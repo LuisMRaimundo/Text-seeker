@@ -254,10 +254,21 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # Must not use the automatic $args variable for installer arguments.
         self.assertNotRegex(cfg, r"\$args\s*=")
-        # Full end-to-end validation of the venv interpreter (sys/pip/tkinter).
-        self.assertIn("import sys, pip, tkinter", cfg)
+        # Full end-to-end validation of the interpreter (import tkinter + Tk()).
+        self.assertIn("VALID OK", cfg)
+        self.assertIn("import tkinter", cfg)
         # Standalone archive must contain python.exe or it fails clearly.
         self.assertIn("did not contain python.exe", cfg)
+        # Validation probe self-locates bundled Tcl/Tk and logs the real error.
+        self.assertIn("TCL_LIBRARY", cfg)
+        self.assertIn("LastPythonProbeOutput", cfg)
+
+    def test_venv_tcl_sitecustomize(self):
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        # venv gets a sitecustomize so the GUI locates Tcl/Tk on every launch.
+        self.assertIn("function Write-VenvTclSiteCustomize", cfg)
+        self.assertIn("sitecustomize.py", cfg)
+        self.assertIn("Write-VenvTclSiteCustomize -VenvDir", cfg)
 
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))

@@ -289,20 +289,64 @@ function Find-PythonExeUnder {
     return $null
 }
 
+function Get-PythonValidationProbe {
+    # Validates sys/pip/tkinter end to end. Self-locates the bundled Tcl/Tk relative
+    # to the base prefix (works for venvs too) so tkinter.Tk() succeeds without relying
+    # on machine TCL_LIBRARY/TK_LIBRARY. Prints VALID OK on success.
+    return @'
+import os, sys
+base = getattr(sys, "base_prefix", sys.prefix)
+tcl_root = os.path.join(base, "tcl")
+if os.path.isdir(tcl_root):
+    for name in os.listdir(tcl_root):
+        full = os.path.join(tcl_root, name)
+        low = name.lower()
+        if not os.path.isdir(full):
+            continue
+        if low.startswith("tcl8"):
+            os.environ.setdefault("TCL_LIBRARY", full)
+        elif low.startswith("tk8"):
+            os.environ.setdefault("TK_LIBRARY", full)
+import pip  # noqa: F401
+import tkinter
+_root = tkinter.Tk()
+_root.destroy()
+print(sys.executable)
+print("VALID OK")
+'@
+}
+
 function Test-PrivatePythonValid {
-    # B10: validate the private interpreter end to end (sys/pip/tkinter).
-    param([string]$PyExe)
-    if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf)) { return $false }
-    $probe = 'import sys, pip, tkinter; print(sys.executable); tkinter.Tk().destroy(); print("tkinter OK")'
+    # End-to-end interpreter validation (sys/pip/tkinter incl. Tk window creation).
+    param([string]$PyExe, [switch]$LogOutput)
+    $script:LastPythonProbeOutput = ''
+    if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf)) {
+        $script:LastPythonProbeOutput = "python.exe not found: $PyExe"
+        if ($LogOutput) { Write-InstallLog $script:LastPythonProbeOutput 'WARN' }
+        return $false
+    }
+    $probeFile = Join-Path $env:TEMP ("ts-pyprobe-" + [System.Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $probeFile -Value (Get-PythonValidationProbe) -Encoding ASCII
     $savedEap = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
+    $ok = $false
+    $out = ''
     try {
-        $out = & $PyExe -c $probe 2>&1
-        $ok = ($LASTEXITCODE -eq 0) -and ("$out" -match 'tkinter OK')
+        # Retry once: first execution of freshly-extracted binaries can be delayed by AV.
+        for ($attempt = 1; $attempt -le 2; $attempt++) {
+            $out = (& $PyExe $probeFile 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -and $out -match 'VALID OK') { $ok = $true; break }
+            Start-Sleep -Seconds 2
+        }
     } catch {
-        $ok = $false
+        $out = "$out`n$($_.Exception.Message)"
     } finally {
         $ErrorActionPreference = $savedEap
+        Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+    }
+    $script:LastPythonProbeOutput = ($out -replace '\s+', ' ').Trim()
+    if (-not $ok -and $LogOutput) {
+        Write-InstallLog ("Python validation probe failed for ${PyExe}: $script:LastPythonProbeOutput") 'WARN'
     }
     return $ok
 }
@@ -361,12 +405,40 @@ function Install-ManagedPython {
         throw "Standalone Python was not placed at $pyExe. See log: $script:InstallLogPath"
     }
 
-    if (-not (Test-PrivatePythonValid -PyExe $pyExe)) {
-        $chk = Test-PythonCandidate -ExePath $pyExe
-        throw "Standalone Python failed validation (sys/pip/tkinter): $($chk.Reason). See log: $script:InstallLogPath"
+    if (-not (Test-PrivatePythonValid -PyExe $pyExe -LogOutput)) {
+        throw "Standalone Python failed validation (sys/pip/tkinter): $script:LastPythonProbeOutput See log: $script:InstallLogPath"
     }
     Write-InstallLog "Managed (standalone) Python ready: $pyExe"
     return $pyExe
+}
+
+function Write-VenvTclSiteCustomize {
+    # Drop a sitecustomize.py into the venv so tkinter finds the bundled Tcl/Tk
+    # (standalone Python) on every launch, without touching machine env vars.
+    param([string]$VenvDir)
+    $siteDir = Join-Path $VenvDir 'Lib\site-packages'
+    if (-not (Test-Path -LiteralPath $siteDir)) {
+        New-Item -ItemType Directory -Force -Path $siteDir | Out-Null
+    }
+    $body = @'
+import os, sys
+try:
+    base = getattr(sys, "base_prefix", sys.prefix)
+    tcl_root = os.path.join(base, "tcl")
+    if os.path.isdir(tcl_root):
+        for name in os.listdir(tcl_root):
+            full = os.path.join(tcl_root, name)
+            low = name.lower()
+            if os.path.isdir(full):
+                if low.startswith("tcl8"):
+                    os.environ.setdefault("TCL_LIBRARY", full)
+                elif low.startswith("tk8"):
+                    os.environ.setdefault("TK_LIBRARY", full)
+except Exception:
+    pass
+'@
+    Set-Content -LiteralPath (Join-Path $siteDir 'sitecustomize.py') -Value $body -Encoding ASCII
+    Write-InstallLog "Wrote venv sitecustomize for Tcl/Tk resolution: $siteDir\sitecustomize.py"
 }
 
 function New-TextSeekerVenv {
@@ -388,8 +460,11 @@ function New-TextSeekerVenv {
         }
     }
 
-    if (-not (Test-PrivatePythonValid -PyExe $venvPy)) {
-        throw "Project venv Python failed validation (sys/pip/tkinter): $venvPy"
+    # Ensure the GUI can always locate the bundled Tcl/Tk (standalone Python) at runtime.
+    Write-VenvTclSiteCustomize -VenvDir $VenvDir
+
+    if (-not (Test-PrivatePythonValid -PyExe $venvPy -LogOutput)) {
+        throw "Project venv Python failed validation (sys/pip/tkinter): $venvPy. $script:LastPythonProbeOutput See log: $script:InstallLogPath"
     }
 
     if ($InstallPackages) {

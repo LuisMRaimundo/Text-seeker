@@ -146,8 +146,13 @@ Assert-True ($cfgText -match 'install_only') 'Managed install uses the install_o
 Assert-True ($cfgText -match 'tar.exe') 'Managed install extracts the standalone archive with tar'
 Assert-True ($cfgText -notmatch 'Start-Process -FilePath \$installerPath') 'Managed install does not run the .exe installer'
 Assert-True ($cfgText -match 'm venv') 'Creates a project-local venv'
-Assert-True ($cfgText -match 'import sys, pip, tkinter') 'venv Python validated end to end'
+Assert-True ($cfgText -match 'VALID OK') 'venv Python validated end to end (probe)'
+Assert-True ($cfgText -match 'TCL_LIBRARY') 'Probe/sitecustomize locate bundled Tcl/Tk'
+Assert-True ($cfgText -match 'sitecustomize') 'venv gets sitecustomize for Tcl/Tk resolution'
 Assert-True ($cfgText -match 'gui_ready = \$guiReady') 'install_state records gui_ready from venv validation'
+
+# Validation probe logs the real error (no more empty reason).
+Assert-True ($cfgText -match 'LastPythonProbeOutput') 'Validation captures probe output for logging'
 
 # venv validation helper returns false for a missing interpreter.
 $tmp3 = Join-Path ([System.IO.Path]::GetTempPath()) ("ts-validpy-" + [System.Guid]::NewGuid().ToString('N'))
