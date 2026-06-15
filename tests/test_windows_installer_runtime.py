@@ -212,6 +212,17 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         self.assertIn("$venvPy = New-TextSeekerVenv", cfg)
         self.assertIn("$launchPy = $venvPy", cfg)
 
+    def test_resolver_functions_return_clean_scalar_paths(self):
+        # Functions must not leak command stdout (pip/venv/tar) into their return value,
+        # or the launch path becomes an array and Split-Path fails on empty strings.
+        cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
+        self.assertIn("return [string]$venvPy", cfg)
+        self.assertIn("return [string]$pyExe", cfg)
+        # pip/venv/tar invocations capture their output instead of emitting it.
+        self.assertIn("-m venv $VenvDir 2>&1 | Out-String", cfg)
+        self.assertIn("$null = & $venvPy -m pip install", cfg)
+        self.assertIn("-xf $archive -C $extractDir 2>&1 | Out-String", cfg)
+
     def test_install_state_records_paths_and_status(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         for field in ("base_python_path", "venv_python_path", "packages_installed",

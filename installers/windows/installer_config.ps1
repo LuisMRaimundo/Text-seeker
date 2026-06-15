@@ -384,9 +384,9 @@ function Install-ManagedPython {
     $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
     if (-not (Test-Path -LiteralPath $tarExe)) { $tarExe = 'tar' }
     Write-InstallLog "Extracting standalone Python with $tarExe"
-    & $tarExe -xf $archive -C $extractDir
+    $tarOut = & $tarExe -xf $archive -C $extractDir 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to extract standalone Python (tar exit $LASTEXITCODE). See log: $script:InstallLogPath"
+        throw "Failed to extract standalone Python (tar exit $LASTEXITCODE). $($tarOut.Trim()) See log: $script:InstallLogPath"
     }
 
     # python-build-standalone 'install_only' extracts to <extract>\python\python.exe
@@ -409,7 +409,7 @@ function Install-ManagedPython {
         throw "Standalone Python failed validation (sys/pip/tkinter): $script:LastPythonProbeOutput See log: $script:InstallLogPath"
     }
     Write-InstallLog "Managed (standalone) Python ready: $pyExe"
-    return $pyExe
+    return [string]$pyExe
 }
 
 function Write-VenvTclSiteCustomize {
@@ -454,9 +454,10 @@ function New-TextSeekerVenv {
             Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         Write-InstallLog "Creating project-local venv at $VenvDir (base: $BasePython)"
-        & $BasePython -m venv $VenvDir
+        # Capture command output so it does not leak into the function return value.
+        $venvOut = & $BasePython -m venv $VenvDir 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
-            throw "Failed to create virtual environment at $VenvDir (base Python: $BasePython)."
+            throw "Failed to create virtual environment at $VenvDir (base Python: $BasePython). $($venvOut.Trim())"
         }
     }
 
@@ -470,13 +471,14 @@ function New-TextSeekerVenv {
     if ($InstallPackages) {
         if (-not (Test-Path -LiteralPath $Requirements)) { throw "Missing requirements.txt at $Requirements" }
         Write-InstallLog 'Installing Python packages into project venv (may take 10-20 minutes)...'
-        & $venvPy -m pip install --upgrade pip wheel setuptools
+        $null = & $venvPy -m pip install --upgrade pip wheel setuptools 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed in venv (exit $LASTEXITCODE)." }
-        & $venvPy -m pip install -r $Requirements
+        $null = & $venvPy -m pip install -r $Requirements 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed in venv (exit $LASTEXITCODE)." }
         Write-InstallLog 'Python packages installed into project venv.'
     }
-    return $venvPy
+    # Return ONLY the venv python path (avoid leaking command output into the result).
+    return [string]$venvPy
 }
 
 function Install-PrivateTesseractTo {
@@ -707,7 +709,7 @@ function Invoke-InstallerRun {
         base_python_path = $basePy
         venv_python_path = $launchPy
         python_path = $launchPy           # legacy alias = launch python
-        python_scripts_path = Join-Path (Split-Path -Parent $launchPy) ''
+        python_scripts_path = Split-Path -Parent $launchPy
         venv_path = $Choices.VenvDir
         packages_installed = [bool]$Choices.InstallPackages
         tesseract_mode = $tessModeState
