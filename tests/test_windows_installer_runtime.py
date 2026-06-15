@@ -188,20 +188,18 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         # Custom never the default; custom path empty unless detected.
         self.assertIn("PythonPath = if ($detectedPy) { $detectedPy.Path } else { '' }", cfg)
 
-    def test_managed_python_normal_per_user_install(self):
+    def test_managed_python_uses_standalone_build(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         self.assertIn("function Install-ManagedPython", cfg)
-        # Normal per-user install: explicit array, /log, no forced custom TargetDir.
-        self.assertIn("$pyArgs = @(", cfg)
-        for token in ("/log", "InstallAllUsers=0", "PrependPath=0",
-                      "Include_exe=1", "Include_lib=1", "Include_pip=1", "Include_tcltk=1"):
-            self.assertIn(token, cfg, msg=token)
-        # Managed install does not force a fragile custom TargetDir.
         managed = cfg[cfg.index("function Install-ManagedPython"):cfg.index("function New-TextSeekerVenv")]
+        # Self-contained relocatable build: download + extract, no .exe installer.
+        self.assertIn("python-build-standalone", cfg)
+        self.assertIn("install_only", cfg)
+        self.assertIn("tar.exe", managed)
+        self.assertNotIn("Start-Process -FilePath $installerPath", managed)
         self.assertNotIn("TargetDir=", managed)
-        # Locate via launcher/per-user/registry; per-user diagnostics retained.
-        self.assertIn("py.exe", cfg)
-        self.assertIn("LOCALAPPDATA", cfg)
+        # Validated end to end before use.
+        self.assertIn("Test-PrivatePythonValid", managed)
 
     def test_always_creates_project_venv(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
@@ -256,11 +254,10 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # Must not use the automatic $args variable for installer arguments.
         self.assertNotRegex(cfg, r"\$args\s*=")
-        # 3010 (reboot-requested) is treated as success.
-        self.assertIn("3010", cfg)
-        # Full end-to-end validation of the venv interpreter.
+        # Full end-to-end validation of the venv interpreter (sys/pip/tkinter).
         self.assertIn("import sys, pip, tkinter", cfg)
-        self.assertIn("python-installer.log", cfg)
+        # Standalone archive must contain python.exe or it fails clearly.
+        self.assertIn("did not contain python.exe", cfg)
 
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))

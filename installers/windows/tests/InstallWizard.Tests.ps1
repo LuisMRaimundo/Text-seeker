@@ -140,10 +140,11 @@ $cfgText = Get-Content -LiteralPath (Join-Path $windowsDir 'installer_config.ps1
 Assert-True ($cfgText -notmatch '\$args\s*=') 'installer_config.ps1 does not assign to automatic $args'
 Assert-True ($cfgText -match 'function Install-ManagedPython') 'Has Install-ManagedPython'
 Assert-True ($cfgText -match 'function New-TextSeekerVenv') 'Has New-TextSeekerVenv'
-Assert-True ($cfgText -match '\$pyArgs = @\(') 'Managed install uses an argument array'
-foreach ($tok in @('Include_exe=1','Include_lib=1','Include_pip=1','Include_tcltk=1','PrependPath=0','InstallAllUsers=0','/log')) {
-    Assert-True ($cfgText -match [regex]::Escape($tok)) "Managed install args include $tok"
-}
+# Managed Python uses the self-contained python-build-standalone build (no .exe installer).
+Assert-True ($cfgText -match 'python-build-standalone') 'Managed install uses python-build-standalone'
+Assert-True ($cfgText -match 'install_only') 'Managed install uses the install_only standalone build'
+Assert-True ($cfgText -match 'tar.exe') 'Managed install extracts the standalone archive with tar'
+Assert-True ($cfgText -notmatch 'Start-Process -FilePath \$installerPath') 'Managed install does not run the .exe installer'
 Assert-True ($cfgText -match 'm venv') 'Creates a project-local venv'
 Assert-True ($cfgText -match 'import sys, pip, tkinter') 'venv Python validated end to end'
 Assert-True ($cfgText -match 'gui_ready = \$guiReady') 'install_state records gui_ready from venv validation'

@@ -20,6 +20,10 @@ $script:Requirements = Join-Path $Root 'requirements.txt'
 $script:Temp = Join-Path $env:TEMP 'text-seeker-setup'
 
 $script:PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+# Managed Python uses a self-contained, relocatable build (python-build-standalone):
+# download + extract = a ready python.exe (no installer, admin, registry, or repair mode).
+$script:PbsTag = '20240415'
+$script:PbsUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/$PbsTag/cpython-$PythonVersion+$PbsTag-x86_64-pc-windows-msvc-install_only.tar.gz"
 $script:TesseractInstallerUrls = @(
     "https://github.com/UB-Mannheim/tesseract/releases/download/v$TesseractVersion/tesseract-ocr-w64-setup-$TesseractVersion.exe"
     "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TesseractVersion.exe"
@@ -304,78 +308,65 @@ function Test-PrivatePythonValid {
 }
 
 function Install-ManagedPython {
-    # Clean-machine route: install the official python.org build in normal per-user
-    # mode (NO fragile custom TargetDir), then locate it via py launcher / per-user
-    # location / registry. The project-local venv -- not this base -- is what we launch.
-    Assert-OfficialPythonInstallerUrl -Url $script:PythonInstallerUrl
-    $pythonInstallerLog = Join-Path $RuntimeRoot 'python-installer.log'
+    # Clean-machine route: download a self-contained, relocatable CPython
+    # (python-build-standalone) and extract it. No installer .exe, no admin, no
+    # registry, no repair-mode, no detection guesswork -- python.exe is just there.
+    $managedDir = $DefaultPrivatePythonDir            # installers\runtime\windows\python
+    $pyExe = Join-Path $managedDir 'python.exe'
 
-    # Already have a usable interpreter? Reuse it as the managed base.
-    $existing = Get-DetectedPythonInstallations | Where-Object { $_.Ready } | Select-Object -First 1
-    if ($existing) {
-        Write-InstallLog "Managed Python: reusing existing compatible interpreter $($existing.Path)"
-        return $existing.Path
+    if ((Test-Path -LiteralPath $pyExe -PathType Leaf) -and (Test-PrivatePythonValid -PyExe $pyExe)) {
+        Write-InstallLog "Managed Python already present and valid: $pyExe"
+        return $pyExe
+    }
+    if (Test-Path -LiteralPath $managedDir) {
+        Write-InstallLog "Removing stale managed Python: $managedDir" 'WARN'
+        Remove-Item -LiteralPath $managedDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
-    $installerPath = Join-Path $Temp 'python-installer.exe'
-    Write-InstallLog "Downloading Python $PythonVersion installer: $script:PythonInstallerUrl"
-    Invoke-WebRequest -Uri $script:PythonInstallerUrl -OutFile $installerPath -UseBasicParsing
-    if (-not (Test-Path -LiteralPath $installerPath)) {
-        throw "Python installer download failed (no file at $installerPath)."
+    $archive = Join-Path $Temp 'cpython-standalone.tar.gz'
+    Write-InstallLog "Downloading standalone Python ${PythonVersion}: $script:PbsUrl"
+    Invoke-WebRequest -Uri $script:PbsUrl -OutFile $archive -UseBasicParsing
+    if (-not (Test-Path -LiteralPath $archive)) {
+        throw "Standalone Python download failed (no file at $archive)."
+    }
+    $sizeMB = [math]::Round((Get-Item -LiteralPath $archive).Length / 1MB, 1)
+    Write-InstallLog "Downloaded standalone Python archive: $archive ($sizeMB MB)"
+
+    # Extract with the built-in bsdtar (handles .tar.gz). Windows 10 1803+ / 11.
+    $extractDir = Join-Path $Temp 'cpython-extract'
+    if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+    $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tarExe)) { $tarExe = 'tar' }
+    Write-InstallLog "Extracting standalone Python with $tarExe"
+    & $tarExe -xf $archive -C $extractDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to extract standalone Python (tar exit $LASTEXITCODE). See log: $script:InstallLogPath"
     }
 
-    # Normal per-user install (default location). Argument array, not interpolation.
-    $pyArgs = @(
-        '/quiet'
-        '/log'
-        "$pythonInstallerLog"
-        'InstallAllUsers=0'
-        'PrependPath=0'
-        'AssociateFiles=0'
-        'Shortcuts=0'
-        'Include_exe=1'
-        'Include_lib=1'
-        'Include_pip=1'
-        'Include_tcltk=1'
-        'Include_launcher=1'
-        'InstallLauncherAllUsers=0'
-        'Include_test=0'
-        'Include_doc=0'
-    )
-    Write-InstallLog "Python installer path: $installerPath"
-    Write-InstallLog ("Python installer args: " + ($pyArgs -join ' '))
-    Write-InstallLog "Python installer log: $pythonInstallerLog"
-    $proc = Start-Process -FilePath $installerPath -ArgumentList $pyArgs -Wait -PassThru
-    Write-InstallLog "Python installer exit code: $($proc.ExitCode)"
-    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-        throw "Python installer failed (exit $($proc.ExitCode)). See log: $pythonInstallerLog"
+    # python-build-standalone 'install_only' extracts to <extract>\python\python.exe
+    $inner = Join-Path $extractDir 'python'
+    if (-not (Test-Path -LiteralPath (Join-Path $inner 'python.exe') -PathType Leaf)) {
+        $found = Find-PythonExeUnder -Root $extractDir
+        if ($found) { $inner = Split-Path -Parent $found }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $inner 'python.exe') -PathType Leaf)) {
+        throw "Standalone Python archive did not contain python.exe. See log: $script:InstallLogPath"
     }
 
-    # Locate the freshly installed interpreter (may finish asynchronously).
-    $base = $null
-    for ($i = 0; $i -lt 60; $i++) {
-        $cand = Get-DetectedPythonInstallations | Where-Object { $_.Ready } | Select-Object -First 1
-        if ($cand) { $base = $cand.Path; break }
-        Start-Sleep -Seconds 1
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $managedDir) | Out-Null
+    Move-Item -LiteralPath $inner -Destination $managedDir -Force
+    if (-not (Test-Path -LiteralPath $pyExe -PathType Leaf)) {
+        throw "Standalone Python was not placed at $pyExe. See log: $script:InstallLogPath"
     }
-    if (-not $base) {
-        $verNoDots = ($PythonVersion -split '\.')[0..1] -join ''
-        foreach ($p in @(
-            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots\python.exe"),
-            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$verNoDots-32\python.exe")
-        )) {
-            if (Test-Path -LiteralPath $p -PathType Leaf) {
-                $chk = Test-PythonCandidate -ExePath $p
-                if ($chk.Ready) { $base = $p; break }
-            }
-        }
+
+    if (-not (Test-PrivatePythonValid -PyExe $pyExe)) {
+        $chk = Test-PythonCandidate -ExePath $pyExe
+        throw "Standalone Python failed validation (sys/pip/tkinter): $($chk.Reason). See log: $script:InstallLogPath"
     }
-    if (-not $base) {
-        throw "Managed Python installed (exit $($proc.ExitCode)) but no usable interpreter was located (py launcher / per-user / registry). See log: $pythonInstallerLog"
-    }
-    Write-InstallLog "Managed Python base interpreter: $base"
-    return $base
+    Write-InstallLog "Managed (standalone) Python ready: $pyExe"
+    return $pyExe
 }
 
 function New-TextSeekerVenv {

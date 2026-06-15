@@ -78,8 +78,8 @@ installers\runtime\windows\python\python.exe installers\common\bootstrap.py doct
 | Installer cancelled | Re-run **Install and Run.bat** |
 | Setup failed on Python/packages | Check log; Python/tkinter/pip/packages are hard requirements |
 | "Custom Python is not usable" | Point Custom Python at a real `python.exe` (or the folder containing it) with Python 3.10+, pip, and tkinter |
-| Clean machine (no Python/Tesseract/Poppler) | Choose **Install managed Python** (default). It installs the official python.org build in normal per-user mode, locates it (py launcher / per-user / registry), then builds the project venv. Tesseract/Poppler are installed if possible; failures are warnings only. |
-| Managed Python not located after install | See `installers\runtime\windows\python-installer.log`. If a Python is already installed, choose **Use detected compatible Python** instead. The launch interpreter is always the venv at `installers\runtime\windows\venv\Scripts\python.exe`. |
+| Clean machine (no Python/Tesseract/Poppler) | Choose **Install managed Python** (default). It downloads a self-contained Python build (python-build-standalone) and extracts it to `installers\runtime\windows\python` (no admin, no registry, no system installer), then builds the project venv. Tesseract/Poppler are installed if possible; failures are warnings only. |
+| Managed Python download/extract failed | Check `installers\runtime\windows\install.log`. Needs internet and the built-in `tar.exe` (Windows 10 1803+/11). If a Python is already installed, choose **Use detected compatible Python** instead. The launch interpreter is always the venv at `installers\runtime\windows\venv\Scripts\python.exe`. |
 | Tesseract/Poppler failed | Warning only — GUI still runs; OCR features limited |
 | OCR disabled | Re-run installer; install private tools or point to existing copies |
 | ARM64 PC | Not supported — use x64 Windows |
