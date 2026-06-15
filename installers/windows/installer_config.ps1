@@ -444,6 +444,9 @@ except Exception:
 function New-TextSeekerVenv {
     # Always create a project-local venv and install requirements into it.
     param([string]$BasePython, [string]$VenvDir, [bool]$InstallPackages = $true)
+    # Function-local: native-command stderr (e.g. pip warnings) must not abort the
+    # installer under the caller's 'Stop' preference. Success is gated on $LASTEXITCODE.
+    $ErrorActionPreference = 'SilentlyContinue'
     $venvPy = Join-Path $VenvDir 'Scripts\python.exe'
 
     if ((Test-Path -LiteralPath $venvPy -PathType Leaf) -and (Test-PrivatePythonValid -PyExe $venvPy)) {
@@ -477,22 +480,56 @@ function New-TextSeekerVenv {
         if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed in venv (exit $LASTEXITCODE)." }
         Write-InstallLog 'Python packages installed into project venv.'
 
-        # Verify the key feature imports actually resolve in THIS venv interpreter.
-        $verify = 'import importlib.util as u, sys; mods=["docx","PIL","pytesseract","fitz","bs4","openpyxl","pdf2image","pdfminer","numpy"]; missing=[m for m in mods if u.find_spec(m) is None]; print("VENV_EXE="+sys.executable); print("MISSING="+",".join(missing))'
-        $verifyOut = (& $venvPy -c $verify 2>&1 | Out-String).Trim()
-        Write-InstallLog "Venv dependency check: $verifyOut"
-        if ($verifyOut -match 'MISSING=(.+)$') {
-            $miss = $Matches[1].Trim()
-            if ($miss) {
-                Write-InstallLog "Reinstalling missing venv packages: $miss" 'WARN'
-                $null = & $venvPy -m pip install --no-cache-dir -r $Requirements 2>&1 | Out-String
-                $verifyOut2 = (& $venvPy -c $verify 2>&1 | Out-String).Trim()
-                Write-InstallLog "Venv dependency re-check: $verifyOut2"
+        # Diagnostic dependency check (must NEVER abort the install).
+        $missing = Get-VenvMissingPackages -VenvPy $venvPy
+        if ($null -ne $missing -and $missing -ne '') {
+            Write-InstallLog "Venv missing packages after install: $missing; reinstalling (no cache)." 'WARN'
+            try {
+                $null = & $venvPy -m pip install --no-cache-dir --upgrade -r $Requirements 2>&1 | Out-String
+            } catch { }
+            $missing2 = Get-VenvMissingPackages -VenvPy $venvPy
+            if ($null -ne $missing2 -and $missing2 -ne '') {
+                Write-InstallLog "Venv STILL missing packages: $missing2 (OCR/DOCX/PDF features may be limited)." 'WARN'
+            } else {
+                Write-InstallLog 'Venv dependency re-check: all key packages present.'
             }
+        } else {
+            Write-InstallLog 'Venv dependency check: all key packages present.'
         }
     }
     # Return ONLY the venv python path (avoid leaking command output into the result).
     return [string]$venvPy
+}
+
+function Get-VenvMissingPackages {
+    # Returns a comma-separated list of missing key imports (or '' if all present).
+    # File-based probe + suppressed errors so it can never abort the installer.
+    param([string]$VenvPy)
+    $probeFile = Join-Path $env:TEMP ("ts-depcheck-" + [System.Guid]::NewGuid().ToString('N') + '.py')
+    $script = @'
+import importlib.util as u, sys
+mods = ["docx", "PIL", "pytesseract", "fitz", "bs4", "openpyxl", "pdf2image", "pdfminer", "numpy"]
+missing = [m for m in mods if u.find_spec(m) is None]
+print("VENV_EXE=" + sys.executable)
+print("MISSING=" + ",".join(missing))
+'@
+    Set-Content -LiteralPath $probeFile -Value $script -Encoding ASCII
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $out = ''
+    try {
+        $out = (& $VenvPy $probeFile 2>&1 | Out-String)
+    } catch {
+        $out = "probe error: $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $savedEap
+        Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+    }
+    Write-InstallLog ("Venv dependency check: " + ($out -replace '\s+', ' ').Trim())
+    if ($out -match 'MISSING=([^\r\n]*)') {
+        return $Matches[1].Trim()
+    }
+    return $null
 }
 
 function Install-PrivateTesseractTo {

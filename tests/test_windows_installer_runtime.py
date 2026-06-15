@@ -300,10 +300,15 @@ class TestWindowsInstallerRuntimePolicy(unittest.TestCase):
     def test_venv_dependency_verification(self):
         cfg = (WINDOWS / "installer_config.ps1").read_text(encoding="utf-8")
         # After installing requirements, the venv imports are verified and logged.
+        self.assertIn("function Get-VenvMissingPackages", cfg)
         self.assertIn("Venv dependency check", cfg)
         self.assertIn("find_spec", cfg)
         self.assertIn("MISSING=", cfg)
         self.assertIn("VENV_EXE=", cfg)
+        # The check is file-based + error-suppressed so it can never abort the install.
+        depfn = cfg[cfg.index("function Get-VenvMissingPackages"):]
+        self.assertIn("$ErrorActionPreference = 'SilentlyContinue'", depfn)
+        self.assertNotIn("-c $verify", cfg)
 
     def test_official_python_installer_only(self):
         sys.path.insert(0, str(COMMON))
