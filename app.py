@@ -1,6 +1,10 @@
 # app.py — orquestrador text-seeker
 from __future__ import annotations
 
+from process_utils import configure_hidden_subprocess_windows
+
+configure_hidden_subprocess_windows()
+
 import os
 import sys
 import re

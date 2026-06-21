@@ -19,6 +19,10 @@ from __future__ import annotations
 from typing import Optional, Union, BinaryIO, Sequence, Tuple
 import os, platform, shutil, io, re, unicodedata
 
+from process_utils import configure_hidden_subprocess_windows, limit_external_processes
+
+configure_hidden_subprocess_windows()
+
 __all__ = ["extract_text_from_image", "resolve_tesseract_cmd"]
 
 # --------------------- resolução do executável (com cache) ---------------------
@@ -220,21 +224,22 @@ def extract_text_from_image(
         except Exception:
             return "", 0.0
 
-    if not try_psm:
-        txt, _ = _ocr_with_conf(img, tess_config)
-        return txt
+    with limit_external_processes():
+        if not try_psm:
+            txt, _ = _ocr_with_conf(img, tess_config)
+            return txt
 
-    # Ronda multi-PSM (tenta alguns perfis correntes)
-    psm_list = [6, 4, 3, 11]
-    best_txt, best_conf = "", -1.0
-    base = "--oem 3"
-    for psm in psm_list:
-        # junta tess_config sem duplicar --psm
-        extra = " ".join(x for x in (tess_config or "").split() if not x.startswith("--psm"))
-        cfg = f"{base} --psm {psm}" + (f" {extra}" if extra else "")
-        txt, conf = _ocr_with_conf(img, cfg)
-        if conf > best_conf:
-            best_conf, best_txt = conf, txt
+        # Ronda multi-PSM (tenta alguns perfis correntes)
+        psm_list = [6, 4, 3, 11]
+        best_txt, best_conf = "", -1.0
+        base = "--oem 3"
+        for psm in psm_list:
+            # junta tess_config sem duplicar --psm
+            extra = " ".join(x for x in (tess_config or "").split() if not x.startswith("--psm"))
+            cfg = f"{base} --psm {psm}" + (f" {extra}" if extra else "")
+            txt, conf = _ocr_with_conf(img, cfg)
+            if conf > best_conf:
+                best_conf, best_txt = conf, txt
 
-    return best_txt
+        return best_txt
 

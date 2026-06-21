@@ -4,6 +4,10 @@ from typing import Callable, List, Optional, Any, Dict, Tuple
 import os, re, unicodedata, hashlib, inspect, logging, warnings
 from pathlib import Path
 
+from process_utils import configure_hidden_subprocess_windows, limit_external_processes
+
+configure_hidden_subprocess_windows()
+
 # Suppress PyPDF2 warnings for malformed PDFs (e.g. "Multiple definitions in dictionary")
 warnings.filterwarnings("ignore", message=".*Multiple definitions.*", category=UserWarning)
 
@@ -260,7 +264,8 @@ def _strip_header_footer(text: str, header_set: set, footer_set: set) -> str:
 def _osd_rotate_pil(im: "Image.Image") -> "Image.Image":
     try:
         import pytesseract
-        osd = pytesseract.image_to_osd(im, output_type=pytesseract.Output.DICT)
+        with limit_external_processes():
+            osd = pytesseract.image_to_osd(im, output_type=pytesseract.Output.DICT)
         rot = int(osd.get("rotate", 0))
         if rot:
             return im.rotate(-rot, expand=True)
@@ -275,7 +280,8 @@ def _render_page_png(filepath: str, page_num: int, dpi: int, sig: str) -> Option
         return im
     try:
         from pdf2image import convert_from_path
-        pages = convert_from_path(filepath, first_page=page_num, last_page=page_num, dpi=dpi)
+        with limit_external_processes():
+            pages = convert_from_path(filepath, first_page=page_num, last_page=page_num, dpi=dpi)
         if pages:
             im = pages[0]
             _cache_set_png(sig, page_num, im)

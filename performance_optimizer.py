@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import multiprocessing
+import sys
 from typing import List, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,7 +14,10 @@ class ParallelProcessor:
     """Thread-pool file processing for I/O-bound search workloads."""
 
     def __init__(self, max_workers: Optional[int] = None):
-        self.max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
+        if max_workers is None:
+            cap = 4 if sys.platform == "win32" else 8
+            max_workers = min(multiprocessing.cpu_count(), cap)
+        self.max_workers = max(1, max_workers)
 
     def process_files_parallel(
         self,
