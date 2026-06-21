@@ -176,7 +176,7 @@ def run_interface(search_fn):
                 base = os.path.splitext(os.path.basename(out))[0]
                 idx_path = os.path.join(out_dir or ".", f"{base}_INDEX.html")
                 if split_output_var.get() and os.path.exists(idx_path):
-                    msg += f"\nGuardado em vários ficheiros. Abra o índice: {base}_INDEX.html"
+                    msg += f"\nSaved to multiple files. Open the index: {base}_INDEX.html"
                 else:
                     msg += f"\nSaved to {out}"
             messagebox.showinfo("Search Complete", msg)
@@ -226,16 +226,16 @@ def run_interface(search_fn):
     ttk.Entry(main, textvariable=out_var, width=50).grid(row=5, column=1, padx=5, sticky='ew')
     ttk.Button(main, text="Save As...", command=on_browse_out).grid(row=5, column=2)
 
-    out_split_frame = ttk.LabelFrame(main, text="Opções de saída", padding="6")
+    out_split_frame = ttk.LabelFrame(main, text="Output Options", padding="6")
     out_split_frame.grid(row=6, column=0, columnspan=3, sticky='ew', padx=0, pady=(4, 0))
     ttk.Checkbutton(
         out_split_frame,
-        text="Guardar em vários ficheiros (evita acumular demasiado texto)",
+        text="Save to multiple files (avoids accumulating too much text)",
         variable=split_output_var
     ).pack(side='left')
-    ttk.Label(out_split_frame, text="Máx. resultados por ficheiro:").pack(side='left', padx=(15, 4))
+    ttk.Label(out_split_frame, text="Max. results per file:").pack(side='left', padx=(15, 4))
     ttk.Spinbox(out_split_frame, from_=50, to=1000, increment=50, textvariable=max_results_per_file_var, width=6).pack(side='left')
-    ttk.Label(out_split_frame, text="(ex.: 100)", foreground="#666666").pack(side='left', padx=4)
+    ttk.Label(out_split_frame, text="(e.g. 100)", foreground="#666666").pack(side='left', padx=4)
 
     # Performance options
     perf_frame = ttk.LabelFrame(main, text="Performance Options", padding="10")
@@ -248,9 +248,9 @@ def run_interface(search_fn):
 
     ling_frame = ttk.LabelFrame(main, text="Linguistic Options", padding="10")
     ling_frame.grid(row=8, column=0, columnspan=3, sticky='ew', padx=5, pady=6)
-    ttk.Checkbutton(ling_frame, text="Stemming (PT/EN: run/running, análise/analise)",
+    ttk.Checkbutton(ling_frame, text="Stemming (PT/EN: run/running, analysis/analyse)",
                     variable=use_stemming_var).pack(side='left', padx=10)
-    ttk.Checkbutton(ling_frame, text="Accent-sensitive (ação ≠ acao)",
+    ttk.Checkbutton(ling_frame, text="Accent-sensitive (café ≠ cafe)",
                     variable=accent_sensitive_var).pack(side='left', padx=10)
 
     ttk.Button(main, text="Pre-scan OCR", command=on_pre_scan_ocr).grid(
