@@ -49,6 +49,10 @@ from app import _launch_gui_with_fallback
 _launch_gui_with_fallback()
 ```
 
+### GUI behaviour on long searches
+
+Search runs on a **background thread**: the window stays responsive and the progress bar / status line update during **indexing** and **search**. The first index build on a very large folder can still take a long time; later runs skip unchanged files (size+mtime). For a faster exploratory pass, set **OCR Mode = never** or temporarily uncheck **Use Indexing**.
+
 ## Command Line Usage
 
 ```bash

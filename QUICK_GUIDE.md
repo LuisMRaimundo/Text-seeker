@@ -35,4 +35,5 @@ Use parentheses to control grouping.
 - Matching is case‑insensitive.
 - Accents are normalized by default (e.g., `ação` ≈ `acao`). Use **accent-sensitive** in the GUI or `--accent-sensitive` on the CLI to disable folding.
 - **Stemming** is on by default in the GUI (e.g. `piano` matches `pianos`). CLI: `--stem` / `--no-stem`.
+- On large folders, watch the GUI **status line** and progress bar (indexing, then search). For a quick first pass: **OCR Mode = never**, or temporarily uncheck **Use Indexing**.
 - Full CLI and architecture: [README_STARTING.md](README_STARTING.md), [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md).

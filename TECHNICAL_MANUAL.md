@@ -24,6 +24,7 @@
 - **File formats**: TXT, PDF, DOCX, HTML, Markdown, Excel (XLSX/XLS), CSV, Images (OCR)
 - **Output formats**: HTML, TXT, CSV, Excel
 - **Performance features**: Inverted-index search, parallel processing, file caching, BM25 ranking
+- **Responsive GUI**: Search runs off the Tk main thread; progress bar and status update during indexing and search
 
 The system uses a **shunting-yard** algorithm for query parsing and **RPN** (Reverse Polish Notation) for evaluation. OCR fallback is available for PDFs and images via Tesseract.
 
@@ -123,17 +124,28 @@ OCR of scanned PDFs/images additionally requires the system tools **Tesseract**
 **Purpose:** Coordinates search across all file types, manages indexing, caching, parallel processing, BM25 re-ranking.
 
 **Key functions:**
-- `search_in_files()` — Main entry; collects files, dispatches per format, applies BM25, saves results
+- `search_in_files()` — Main entry; collects files, optional index refresh/prefilter, dispatches per format, applies BM25, saves results
 - `normalize_extracted_text()` — NFKC, line-break join, whitespace collapse, accent-fold
 - Highlighting is handled in `save_results.py` (`_highlight_context_html`)
 - `_evaluate_text()` — Wrapper around parser.evaluate; extracts context snippets
 - `scan_ocr_candidates()` — Pre-scan for PDFs/images likely needing OCR
 
+**Progress / status callbacks (optional):**
+- `progress_callback(processed, total, remaining_sec)` — fired during **indexing** and **search** phases
+- `status_callback(message)` — human-readable phase text (e.g. `Indexing 120/5000…`, `Searching 40/200…`)
+
+**Indexing phase behaviour:** For each indexable file, `IndexManager.needs_reindex()` runs **before** text extraction. Unchanged files are skipped (no full extract). First run on a large corpus can still take a long time; later runs are much faster.
+
 ## 4.2 main.py — GUI (Tkinter)
 
 **Purpose:** Graphical interface; `run_interface(search_fn)` injects `search_in_files` as backend.
 
-**Features:** Directory picker, query input, file-type checkboxes, OCR mode, min relevance, context size, output path, performance options (indexing, parallel, cache), split output, pre-scan OCR.
+**Features:** Directory picker, query input, file-type checkboxes, OCR mode, min relevance, context size, output path, performance options (indexing, parallel), split output, pre-scan OCR, progress bar + ETA + status line.
+
+**Threading model:**
+- **START SEARCH** launches `search_in_files` on a **daemon worker thread** so the window stays responsive.
+- Progress/status/completion events are queued and drained on the UI thread via `root.after` (never call Tk widgets directly from the worker).
+- The Start button is disabled while a search is running.
 
 ## 4.3 boolean_parser.py — BooleanSearchParser
 
@@ -169,7 +181,9 @@ OCR of scanned PDFs/images additionally requires the system tools **Tesseract**
 
 ## 4.9 indexing.py — Inverted Index
 
-**Purpose:** `DocumentIndex` (term → doc_id → positions); `IndexManager` (persistence, change detection via file hash); AND/OR term search.
+**Purpose:** `DocumentIndex` (term → doc_id → positions); `IndexManager` (persistence, incremental updates); AND/OR term search.
+
+**Change detection:** Sidecar fingerprint under `~/.text-seeker_index/` using **`size:mtime_ns`** (not a full-file content hash). `needs_reindex(path)` is cheap and is checked before extraction.
 
 ## 4.10 performance_optimizer.py — Cache, Parallel, BM25
 
@@ -323,7 +337,11 @@ Where $\text{bm25\_norm} = \min(1, \text{bm25\_total} / (2 \cdot |\text{terms}|)
 **AND:** Intersection of document sets per term.
 **OR:** Union of document sets per term.
 
-**Change detection:** MD5 of file content; skip reindex if hash unchanged.
+**Change detection (fingerprint):**
+
+$$\text{fp}(f) = \text{size}(f)\,{:}\,\text{mtime\_ns}(f)$$
+
+Skip reindex when the sidecar fingerprint matches. This avoids reading multi‑MB PDF bytes solely to decide whether the index is stale. (MD5 of full content is **not** used for this check.)
 
 ---
 
@@ -344,6 +362,8 @@ Returns `text[start:end]`.
 $$\text{elapsed} = t_{\text{now}} - t_{\text{start}}$$
 $$\text{rate} = \text{processed} / \text{elapsed}$$
 $$\text{remaining} = (\text{total} - \text{processed}) / \text{rate} \quad \text{if rate} > 0$$
+
+The GUI progress bar uses the same formula independently for the **indexing** phase and the **search** phase (each phase resets its own start time / totals). Status text is separate from the numeric progress callback.
 
 ---
 
@@ -387,7 +407,7 @@ Count occurrences of `,`, `;`, `\t`, `|` in sample; choose maximum.
 
 $$\text{hash} = \text{MD5}(\text{bytes})$$
 
-Used for: file signature (path|size|mtime), content deduplication (HTML blocks), OCR cache keys.
+Used for: HTML content-block deduplication and OCR/cache keys where applicable. **Index change detection** uses size+mtime fingerprints (see §5.12), not full-file MD5.
 
 ---
 
@@ -409,9 +429,15 @@ python app.py
 - Optional: OCR mode (auto/force/never), split output, max results per file
 
 **Step 3 — Search**
-- Click **START SEARCH**
 - Optionally choose output file (HTML/CSV/Excel/TXT)
-- Results open or save to selected path
+- Click **START SEARCH**
+- Watch the **status line** and **progress bar** (indexing first if enabled, then search). The window stays usable.
+- When finished, a dialog reports the result count (and output path if set)
+
+**Tips for very large folders**
+- First run with **Use Indexing** builds/refreshes the index — can take a long time but subsequent runs skip unchanged files.
+- For a faster exploratory pass: set **OCR Mode = never**, or temporarily uncheck **Use Indexing**.
+- Prefer **Pre-scan OCR** and skip heavy scanned PDFs when you do not need OCR.
 
 ---
 
@@ -475,7 +501,7 @@ Before search, click **Pre-scan OCR** to list PDFs/images likely needing OCR. Se
 
 ## 6.6 Split Output
 
-When "Guardar em vários ficheiros" is enabled and "Máx. resultados por ficheiro" is set (e.g. 100):
+When **Save to multiple files** is enabled and **Max. results per file** is set (e.g. 100):
 - Results split into `output_1.html`, `output_2.html`, …
 - Index file `output_INDEX.html` links to all parts
 
@@ -483,9 +509,19 @@ When "Guardar em vários ficheiros" is enabled and "Máx. resultados por ficheir
 
 ## 6.7 Performance Options
 
-- **Use Indexing**: Pre-filters files via inverted index (for simple queries)
-- **Parallel Processing**: Multi-core file processing
-- **File Caching**: Avoid re-reading unchanged files (LRU eviction)
+- **Use Indexing**: Refresh/prefilter via inverted index (simple queries without NOT/NEAR/wildcards). Unchanged files are skipped via size+mtime fingerprint.
+- **Parallel Processing**: Multi-threaded file processing (I/O-bound pool)
+- Progress bar + ETA update during indexing and search; status line shows the current phase
+
+---
+
+## 6.8 Troubleshooting: “UI frozen / no progress”
+
+| Symptom | Likely cause | What to do |
+|---------|--------------|------------|
+| Window frozen, bar stuck at 0% | Old build that ran search on the Tk thread | Update to current `main` and restart the GUI |
+| Status shows indexing for a long time | First index of a huge corpus | Wait, or disable indexing / set OCR=never for a quick pass |
+| Many ERROR/timeouts on huge PDFs | OCR on large scanned books | OCR=never or skip via Pre-scan OCR |
 
 ---
 
@@ -547,7 +583,7 @@ When "Guardar em vários ficheiros" is enabled and "Máx. resultados por ficheir
 
 - **Rivest, R.** (1992). The MD5 message-digest algorithm. *RFC 1321*. https://tools.ietf.org/html/rfc1321
 
-- **Note:** MD5 is used here for non-security purposes (cache keys, change detection). For security, use SHA-256 or stronger.
+- **Note:** MD5 is used here for non-security purposes (cache keys, HTML dedup). Index freshness uses size+mtime fingerprints, not content MD5.
 
 ## 7.10 Document Formats
 
