@@ -7,6 +7,8 @@ def run_interface(search_fn):
     """
     try:
         import os
+        import threading
+        import queue
         import tkinter as tk
         from tkinter import ttk, filedialog, messagebox
     except ImportError:
@@ -29,6 +31,8 @@ def run_interface(search_fn):
     prog_var = tk.DoubleVar(value=0.0)
     eta_var = tk.StringVar(value="ETA: --")
     include_subfolders_var = tk.BooleanVar(value=True)
+    search_busy = {"running": False}
+    ui_queue: "queue.Queue[tuple]" = queue.Queue()
 
     ft_vars = {
         'txt': tk.BooleanVar(value=True),
@@ -113,16 +117,63 @@ def run_interface(search_fn):
         ttk.Button(btns, text="Clear skip list", command=_clear_skip).pack(side="left", padx=6)
         ttk.Button(btns, text="Close", command=win.destroy).pack(side="right")
 
+    def _drain_ui_queue():
+        """Apply progress/status/done events from the worker thread on the UI thread."""
+        try:
+            while True:
+                kind, payload = ui_queue.get_nowait()
+                if kind == "progress":
+                    processed, total, remaining_sec = payload
+                    pct = 0.0 if total <= 0 else (processed / total) * 100.0
+                    prog_var.set(pct)
+                    if remaining_sec > 0:
+                        mins = int(remaining_sec // 60)
+                        secs = int(remaining_sec % 60)
+                        eta_var.set(f"ETA: {mins}m {secs}s")
+                    else:
+                        eta_var.set("ETA: --")
+                elif kind == "status":
+                    status_label.config(text=str(payload))
+                elif kind == "done":
+                    results, out, err = payload
+                    search_busy["running"] = False
+                    start_btn.config(state="normal")
+                    if err is not None:
+                        messagebox.showerror("Error", str(err))
+                        status_label.config(text="Error occurred.")
+                    else:
+                        msg = f"Found {len(results)} results."
+                        if out:
+                            out_dir = os.path.dirname(out)
+                            base = os.path.splitext(os.path.basename(out))[0]
+                            idx_path = os.path.join(out_dir or ".", f"{base}_INDEX.html")
+                            if split_output_var.get() and os.path.exists(idx_path):
+                                msg += f"\nSaved to multiple files. Open the index: {base}_INDEX.html"
+                            else:
+                                msg += f"\nSaved to {out}"
+                        messagebox.showinfo("Search Complete", msg)
+                        status_label.config(text="Ready.")
+                        prog_var.set(100.0)
+                ui_queue.task_done()
+        except queue.Empty:
+            pass
+        root.after(100, _drain_ui_queue)
+
     def on_search():
+        if search_busy["running"]:
+            messagebox.showinfo("Busy", "A search is already running.")
+            return
+
         d, q, out = dir_var.get(), query_var.get(), out_var.get()
         if not d or not q:
             messagebox.showwarning("Missing Info", "Please select a directory and enter a query.")
             return
 
-        status_label.config(text="Searching... please wait.")
+        status_label.config(text="Starting search (UI stays responsive)...")
         prog_var.set(0.0)
         eta_var.set("ETA: --")
-        root.update()
+        search_busy["running"] = True
+        start_btn.config(state="disabled")
 
         # Formato de saída pela extensão
         if out:
@@ -138,54 +189,46 @@ def run_interface(search_fn):
         else:
             out_fmt = 'html'
 
-        def _progress_cb(processed: int, total: int, remaining_sec: float):
-            pct = 0.0 if total <= 0 else (processed / total) * 100.0
-            prog_var.set(pct)
-            if remaining_sec > 0:
-                mins = int(remaining_sec // 60)
-                secs = int(remaining_sec % 60)
-                eta_var.set(f"ETA: {mins}m {secs}s")
-            else:
-                eta_var.set("ETA: --")
-            root.update_idletasks()
+        file_types = {k: v.get() for k, v in ft_vars.items()}
+        kwargs = dict(
+            directory=d,
+            boolean_query=q,
+            file_types=file_types,
+            min_relevance=min_rel_var.get(),
+            context_size=ctx_var.get(),
+            ocr_mode=ocr_var.get(),
+            output_path=out if out else None,
+            output_format=out_fmt,
+            use_indexing=use_indexing_var.get(),
+            use_parallel=use_parallel_var.get(),
+            use_stemming=use_stemming_var.get(),
+            accent_fold=not accent_sensitive_var.get(),
+            ocr_skip_paths=set(ocr_skip_paths),
+            include_subfolders=include_subfolders_var.get(),
+            output_per_folder=split_output_var.get(),
+            max_results_per_file=max_results_per_file_var.get() if split_output_var.get() else 0,
+        )
 
-        try:
-            file_types = {k: v.get() for k, v in ft_vars.items()}
-            results = search_fn(
-                directory=d,
-                boolean_query=q,
-                file_types=file_types,
-                min_relevance=min_rel_var.get(),
-                context_size=ctx_var.get(),
-                ocr_mode=ocr_var.get(),
-                output_path=out if out else None,
-                output_format=out_fmt,
-                use_indexing=use_indexing_var.get(),
-                use_parallel=use_parallel_var.get(),
-                use_stemming=use_stemming_var.get(),
-                accent_fold=not accent_sensitive_var.get(),
-                progress_callback=_progress_cb,
-                ocr_skip_paths=ocr_skip_paths,
-                include_subfolders=include_subfolders_var.get(),
-                output_per_folder=split_output_var.get(),
-                max_results_per_file=max_results_per_file_var.get() if split_output_var.get() else 0,
-            )
-            msg = f"Found {len(results)} results."
-            if out:
-                out_dir = os.path.dirname(out)
-                base = os.path.splitext(os.path.basename(out))[0]
-                idx_path = os.path.join(out_dir or ".", f"{base}_INDEX.html")
-                if split_output_var.get() and os.path.exists(idx_path):
-                    msg += f"\nSaved to multiple files. Open the index: {base}_INDEX.html"
-                else:
-                    msg += f"\nSaved to {out}"
-            messagebox.showinfo("Search Complete", msg)
-            status_label.config(text="Ready.")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            messagebox.showerror("Error", str(e))
-            status_label.config(text="Error occurred.")
+        def _progress_cb(processed: int, total: int, remaining_sec: float):
+            ui_queue.put(("progress", (processed, total, remaining_sec)))
+
+        def _status_cb(msg: str):
+            ui_queue.put(("status", msg))
+
+        def _worker():
+            try:
+                results = search_fn(
+                    progress_callback=_progress_cb,
+                    status_callback=_status_cb,
+                    **kwargs,
+                )
+                ui_queue.put(("done", (results, out, None)))
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                ui_queue.put(("done", ([], out, e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # Layout
     main = ttk.Frame(root, padding=20)
@@ -258,9 +301,8 @@ def run_interface(search_fn):
     )
     ttk.Label(main, textvariable=ocr_skip_count).grid(row=9, column=1, sticky='w')
 
-    ttk.Button(main, text="START SEARCH", command=on_search, style="Accent.TButton").grid(
-        row=10, column=0, columnspan=3, pady=12, sticky='ew'
-    )
+    start_btn = ttk.Button(main, text="START SEARCH", command=on_search, style="Accent.TButton")
+    start_btn.grid(row=10, column=0, columnspan=3, pady=12, sticky='ew')
 
     prog = ttk.Progressbar(main, variable=prog_var, maximum=100.0)
     prog.grid(row=11, column=0, columnspan=2, sticky='ew', pady=(0, 6))
@@ -270,4 +312,5 @@ def run_interface(search_fn):
     status_label.grid(row=12, column=0, columnspan=3, sticky='ew')
 
     main.columnconfigure(1, weight=1)
+    root.after(100, _drain_ui_queue)
     root.mainloop()

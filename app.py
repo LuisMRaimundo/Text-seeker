@@ -250,6 +250,7 @@ def search_in_files(
     use_stemming: Optional[bool] = None,
     accent_fold: Optional[bool] = None,
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
+    status_callback: Optional[Callable[[str], None]] = None,
     ocr_skip_paths: Optional[Set[str]] = None,
     include_subfolders: bool = True,
     max_ocr_pages: int = 150,   # Max pages to run OCR on (0 = unlimited)
@@ -292,7 +293,27 @@ def search_in_files(
     except Exception:
         pass
 
+    def _set_status(msg: str) -> None:
+        if status_callback:
+            try:
+                status_callback(msg)
+            except Exception:
+                pass
+
+    def _report_progress(processed: int, total: int, start_time: float,
+                         cb: Optional[Callable[[int, int, float], None]]):
+        if not cb or total <= 0:
+            return
+        elapsed = max(0.001, time.time() - start_time)
+        rate = processed / elapsed if processed else 0.0
+        remaining = (total - processed) / rate if rate > 0 else 0.0
+        try:
+            cb(processed, total, remaining)
+        except Exception:
+            pass
+
     # Colecionar ficheiros de TODAS as pastas, tag com root_folder
+    _set_status("Scanning folders for files...")
     all_files: List[Tuple[str, str, str]] = []  # (path, ext, root_folder)
     for root_dir in roots:
         if include_subfolders:
@@ -310,30 +331,55 @@ def search_in_files(
                 lower = name.lower()
                 ext = os.path.splitext(lower)[1]
                 all_files.append((path, ext, root_dir))
-    
+
+    _safe_print(f"[OK] Found {len(all_files)} file(s) under {len(roots)} folder(s)")
+    _set_status(f"Found {len(all_files)} file(s). Preparing search...")
+
     document_text_cache: Dict[str, str] = {}
 
     # Build / refresh inverted index for this corpus, then prefilter when safe
     if use_indexing and index_manager:
+        indexable = [
+            (path, ext, root)
+            for path, ext, root in all_files
+            if should_index_extension(ext, file_types)
+        ]
         indexed_count = 0
-        for path, ext, _root in all_files:
-            if not should_index_extension(ext, file_types):
-                continue
+        skipped_unchanged = 0
+        idx_total = len(indexable)
+        idx_start = time.time()
+        _set_status(
+            f"Indexing phase: checking {idx_total} file(s) "
+            "(unchanged files are skipped — first run can take a long time)..."
+        )
+        for i, (path, ext, _root) in enumerate(indexable, start=1):
             try:
-                doc_text = extract_document_text(
-                    path, ext, file_types,
-                    normalize=normalize_extracted_text,
-                    ocr_image_fn=extract_text_from_image if file_types.get("image") else None,
-                )
-                if doc_text:
-                    with cache_lock:
-                        document_text_cache[path] = doc_text
-                    if index_manager.index_file(path, doc_text):
-                        indexed_count += 1
+                # Skip expensive extract when fingerprint says unchanged
+                if not index_manager.needs_reindex(path):
+                    skipped_unchanged += 1
+                else:
+                    doc_text = extract_document_text(
+                        path, ext, file_types,
+                        normalize=normalize_extracted_text,
+                        ocr_image_fn=extract_text_from_image if file_types.get("image") else None,
+                    )
+                    if doc_text:
+                        with cache_lock:
+                            document_text_cache[path] = doc_text
+                        if index_manager.index_file(path, doc_text):
+                            indexed_count += 1
             except Exception as e:
                 print(f"Index skip {path}: {e}")
+            if i == 1 or i % 5 == 0 or i == idx_total:
+                _report_progress(i, idx_total, idx_start, progress_callback)
+                _set_status(
+                    f"Indexing {i}/{idx_total} "
+                    f"(updated {indexed_count}, skipped {skipped_unchanged})..."
+                )
         if indexed_count:
             _safe_print(f"[OK] Indexed/updated {indexed_count} file(s)")
+        if skipped_unchanged:
+            _safe_print(f"[OK] Index unchanged skip: {skipped_unchanged} file(s)")
         index_manager.save()
 
         if index_prefilter_allowed(parser.tokens, parser.search_terms):
@@ -343,21 +389,15 @@ def search_in_files(
                 _safe_print(f"[OK] Index prefilter ({op}): {len(indexed_paths)} candidate file(s)")
                 indexed_set = set(indexed_paths)
                 all_files = [(p, e, r) for p, e, r in all_files if p in indexed_set]
-    
-    def _report_progress(processed: int, total: int, start_time: float,
-                         cb: Optional[Callable[[int, int, float], None]]):
-        if not cb or total <= 0:
-            return
-        elapsed = max(0.001, time.time() - start_time)
-        rate = processed / elapsed if processed else 0.0
-        remaining = (total - processed) / rate if rate > 0 else 0.0
-        cb(processed, total, remaining)
+        _set_status(f"Searching {len(all_files)} file(s)...")
 
     ocr_skip_paths = set(ocr_skip_paths or [])
 
     # Process files (with or without parallel processing)
-    if use_parallel and parallel_processor and len(all_files) > 10:
-        _safe_print(f"[...] Processing {len(all_files)} files in parallel...")
+    search_total = len(all_files)
+    _set_status(f"Searching {search_total} file(s)...")
+    if use_parallel and parallel_processor and search_total > 10:
+        _safe_print(f"[...] Processing {search_total} files in parallel...")
         def process_file_wrapper(file_info: Tuple[str, str, str]) -> List[dict]:
             path, ext, root_folder = file_info
             return _process_single_file(
@@ -368,10 +408,16 @@ def search_in_files(
                 cache_lock=cache_lock,
             )
         start_time = time.time()
+
+        def _parallel_progress(p: int, t: int) -> None:
+            _report_progress(p, t, start_time, progress_callback)
+            if p == 1 or p % 5 == 0 or p == t:
+                _set_status(f"Searching {p}/{t} file(s)...")
+
         file_results = parallel_processor.process_files_parallel(
             all_files,
             process_file_wrapper,
-            progress_callback=lambda p, t: _report_progress(p, t, start_time, progress_callback)
+            progress_callback=_parallel_progress,
         )
         for file_result_list in file_results:
             results.extend(file_result_list)
@@ -394,7 +440,9 @@ def search_in_files(
                 print(f"Search error {path}: {e}")
             finally:
                 processed += 1
-                _report_progress(processed, len(all_files), start_time, progress_callback)
+                _report_progress(processed, search_total, start_time, progress_callback)
+                if processed == 1 or processed % 5 == 0 or processed == search_total:
+                    _set_status(f"Searching {processed}/{search_total} file(s)...")
 
     # Apply BM25 ranking improvement if multiple results
     if len(results) > 1:

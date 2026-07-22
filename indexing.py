@@ -369,33 +369,41 @@ class IndexManager:
         except Exception as e:
             print(f"[WARN] Could not save index: {e}")
     
-    def _file_hash(self, filepath: str) -> Optional[str]:
-        """Calculate file hash for change detection."""
+    def _file_fingerprint(self, filepath: str) -> Optional[str]:
+        """Cheap change token: size + mtime (avoids reading whole multi‑MB PDFs)."""
         try:
-            with open(filepath, 'rb') as f:
-                return hashlib.md5(f.read()).hexdigest()
+            st = os.stat(filepath)
+            return f"{st.st_size}:{getattr(st, 'st_mtime_ns', int(st.st_mtime * 1e9))}"
         except Exception:
             return None
-    
-    def _should_reindex(self, filepath: str, current_hash: Optional[str]) -> bool:
+
+    def _hash_sidecar_path(self, filepath: str) -> Path:
+        return self.index_dir / f"{hashlib.md5(filepath.encode('utf-8', errors='replace')).hexdigest()}.hash"
+
+    def needs_reindex(self, filepath: str) -> bool:
+        """True if filepath is new/changed and must be (re)extracted for the index."""
+        if not os.path.exists(filepath):
+            return False
+        fp = self._file_fingerprint(filepath)
+        return self._should_reindex(filepath, fp)
+
+    def _should_reindex(self, filepath: str, current_fp: Optional[str]) -> bool:
         """Check if file needs reindexing."""
-        hash_file = self.index_dir / f"{hashlib.md5(filepath.encode()).hexdigest()}.hash"
-        
+        hash_file = self._hash_sidecar_path(filepath)
         if not hash_file.exists():
             return True
-        
         try:
-            stored_hash = hash_file.read_text().strip()
-            return stored_hash != current_hash
-        except:
+            stored = hash_file.read_text(encoding="utf-8").strip()
+            return stored != (current_fp or "")
+        except Exception:
             return True
-    
-    def _save_file_hash(self, filepath: str, file_hash: str):
-        """Save file hash for change detection."""
-        hash_file = self.index_dir / f"{hashlib.md5(filepath.encode()).hexdigest()}.hash"
+
+    def _save_file_hash(self, filepath: str, file_fp: str):
+        """Save fingerprint for change detection."""
+        hash_file = self._hash_sidecar_path(filepath)
         try:
-            hash_file.write_text(file_hash)
-        except:
+            hash_file.write_text(file_fp, encoding="utf-8")
+        except Exception:
             pass
     
     def index_file(self, filepath: str, text: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
@@ -409,17 +417,17 @@ class IndexManager:
             return False
         
         # Check if file needs reindexing
-        file_hash = self._file_hash(filepath)
-        if not self._should_reindex(filepath, file_hash):
+        file_fp = self._file_fingerprint(filepath)
+        if not self._should_reindex(filepath, file_fp):
             return False  # File unchanged, skip
-        
+
         # Add/update in index
         self.index.update_document(filepath, text, metadata)
-        
-        # Save hash
-        if file_hash:
-            self._save_file_hash(filepath, file_hash)
-        
+
+        # Save fingerprint
+        if file_fp:
+            self._save_file_hash(filepath, file_fp)
+
         return True
 
     def search(self, query_terms: List[str], operator: str = "AND") -> List[str]:
