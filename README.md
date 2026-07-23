@@ -2,7 +2,7 @@
 
 **Repository:** [github.com/LuisMRaimundo/Text-seeker](https://github.com/LuisMRaimundo/Text-seeker)
 
-Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, images via OCR). Runs **offline** on your machine; indexes and caches live under your home directory. The GUI keeps the window responsive during long runs and shows **live progress** for indexing and search.
+Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, images via OCR). Runs **offline** on your machine; indexes and caches live under your home directory. The GUI stays responsive during long runs, shows **live progress** (including OCR page status), and **skips files that exceed a time limit** so one stuck PDF cannot freeze a whole batch.
 
 **Supported formats:** TXT, PDF, DOCX, HTML, Markdown, Excel (`.xlsx`/`.xls`), CSV, common image formats (OCR).
 
@@ -45,10 +45,11 @@ Continuous integration runs the same test suite on push (see `.github/workflows/
 
 | Path | Role |
 |------|------|
-| `app.py`, `main.py` | CLI orchestrator and Tkinter GUI (search on a worker thread + progress UI) |
+| `app.py`, `main.py` | CLI orchestrator and Tkinter GUI (worker thread, progress, timeout skips) |
 | `boolean_parser.py`, `nlp_utils.py` | Query parsing, stemming, tokenization |
 | `indexing.py`, `text_extract.py` | Inverted index (size+mtime skip) and full-document extraction |
-| `search_*.py`, `html_search.py`, `text_search.py` | Per-format search |
+| `search_*.py`, `html_search.py`, `text_search.py` | Per-format search (PDF OCR with page cap / faster defaults) |
+| `performance_optimizer.py` | Parallel pool with per-file timeout |
 | `tests/` | Unit and integration tests |
 
 ## Documentation

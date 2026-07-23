@@ -51,7 +51,11 @@ _launch_gui_with_fallback()
 
 ### GUI behaviour on long searches
 
-Search runs on a **background thread**: the window stays responsive and the progress bar / status line update during **indexing** and **search**. The first index build on a very large folder can still take a long time; later runs skip unchanged files (size+mtime). For a faster exploratory pass, set **OCR Mode = never** or temporarily uncheck **Use Indexing**.
+Search runs on a **background thread**: the window stays responsive and the progress bar / status line update during **indexing** and **search**. During PDF OCR the status can show the active file and page (e.g. `ocr 12/40: scan.pdf`).
+
+If a single file takes too long (default **180 seconds**), it is **skipped** and the batch continues. At the end, the completion dialog lists any timed-out files. Override with env `TEXT_SEEKER_FILE_TIMEOUT` or CLI `--file-timeout` (`0` = no limit).
+
+The first index build on a very large folder can still take a long time; later runs skip unchanged files (size+mtime). For a faster exploratory pass, set **OCR Mode = never** or temporarily uncheck **Use Indexing**.
 
 ## Command Line Usage
 
@@ -62,8 +66,8 @@ python app.py --dir "C:\path\to\docs" --query "textur* AND uniform*" --types "pd
 # With output file
 python app.py --dir "C:\path\to\docs" --query "search terms" --out results.html
 
-# Full options
-python app.py --dir "C:\docs" --query "query" --types "pdf,txt" --minrel 0.5 --ctx 200 --ocr auto --out results.html --fmt html
+# Full options (OCR page cap + per-file timeout)
+python app.py --dir "C:\docs" --query "query" --types "pdf,txt" --minrel 0.5 --ctx 200 --ocr auto --max-ocr-pages 40 --file-timeout 180 --out results.html --fmt html
 ```
 
 ## Troubleshooting
