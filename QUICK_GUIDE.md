@@ -1,6 +1,6 @@
 # Quick Guide: Boolean Queries
 
-**text-seeker** searches local folders with boolean logic. Supported types: **TXT, PDF, DOCX, HTML, Markdown, Excel, CSV, images (OCR)**.
+**text-seeker** searches local folders with boolean logic. Supported types: **TXT, PDF, DOCX, HTML, Markdown, Excel, CSV, JSON, Turtle/RDF, EPUB/FB2, images (OCR)**.
 
 ## Operators
 - `AND` (also `&&`)
@@ -36,6 +36,6 @@ Use parentheses to control grouping.
 - Accents are normalized by default (e.g., `ação` ≈ `acao`). Use **accent-sensitive** in the GUI or `--accent-sensitive` on the CLI to disable folding.
 - **Stemming** is on by default in the GUI (e.g. `piano` matches `pianos`). CLI: `--stem` / `--no-stem`.
 - On large folders, watch the GUI **status line** and progress bar (indexing, then search). Status may show OCR page progress for scanned PDFs.
-- A file that exceeds the **per-file timeout** (default 180s) is skipped; the run continues and lists skips at the end.
+- Optional `--file-timeout` / `TEXT_SEEKER_FILE_TIMEOUT` can stop a stuck file; default is **no limit** (finish every file).
 - For a quick first pass: **OCR Mode = never**, or temporarily uncheck **Use Indexing**. Use **Pre-scan OCR** to skip heavy scans.
 - Full CLI and architecture: [README_STARTING.md](README_STARTING.md), [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md).

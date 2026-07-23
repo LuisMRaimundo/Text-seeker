@@ -200,11 +200,11 @@ after changing PATH.
 **OCR finds nothing in scanned PDFs**
 Make sure both Tesseract **and** Poppler are installed and on PATH, and that the
 Tesseract **language pack** for your documents is installed (e.g. Portuguese `por`).
-OCR is still slower than text extraction. Defaults limit OCR to the first **40**
-pages per PDF and skip any file that exceeds **180 seconds** so a batch cannot
-stall for hours on one scan. Use **OCR Mode = never** for text-layer PDFs, or
-**Pre-scan OCR** to skip heavy files. Override timeout with
-`TEXT_SEEKER_FILE_TIMEOUT` or `--file-timeout`.
+OCR is still slower than text extraction. Defaults limit OCR to the first **150**
+pages per PDF (like older builds). There is **no per-file skip by default**.
+Use **OCR Mode = never** for text-layer PDFs, or **Pre-scan OCR** to skip heavy
+files. Optional: `TEXT_SEEKER_FILE_TIMEOUT` / `--file-timeout` (seconds of active
+work per file).
 
 **Do I need Tesseract/Poppler at all?**
 Only for OCR of **scanned** PDFs and images. Plain text, text-based PDFs, DOCX, HTML,

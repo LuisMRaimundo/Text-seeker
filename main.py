@@ -43,6 +43,9 @@ def run_interface(search_fn):
         'md': tk.BooleanVar(value=False),
         'excel': tk.BooleanVar(value=False),
         'csv': tk.BooleanVar(value=False),
+        'json': tk.BooleanVar(value=False),
+        'ttl': tk.BooleanVar(value=False),
+        'ebook': tk.BooleanVar(value=False),
     }
     
     # Performance options
@@ -261,8 +264,23 @@ def run_interface(search_fn):
 
     ft_frame = ttk.LabelFrame(main, text="File Types")
     ft_frame.grid(row=3, column=0, columnspan=3, sticky='ew', pady=10)
+    _ft_labels = {
+        "txt": "TXT",
+        "pdf": "PDF",
+        "docx": "DOCX",
+        "html": "HTML",
+        "image": "IMAGE",
+        "md": "MD",
+        "excel": "EXCEL",
+        "csv": "CSV",
+        "json": "JSON",
+        "ttl": "TTL/RDF",
+        "ebook": "EPUB",
+    }
     for k, v in ft_vars.items():
-        ttk.Checkbutton(ft_frame, text=k.upper(), variable=v).pack(side='left', padx=10)
+        ttk.Checkbutton(ft_frame, text=_ft_labels.get(k, k.upper()), variable=v).pack(
+            side="left", padx=6
+        )
 
     adv_frame = ttk.LabelFrame(main, text="Advanced Options")
     adv_frame.grid(row=4, column=0, columnspan=3, sticky='ew', pady=10)

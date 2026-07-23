@@ -27,8 +27,11 @@ from ocr_utils import extract_text_from_image, resolve_tesseract_cmd
 from save_results import save_results
 from indexing import IndexManager, index_prefilter_allowed, index_operator_for_tokens
 from performance_optimizer import ParallelProcessor, calculate_bm25_score
-from text_extract import extract_document_text, should_index_extension
+from text_extract import extract_document_text, should_index_extension, effective_extension
 from nlp_utils import stem_token, normalize_token
+from search_json import search_in_json_file
+from search_rdf import search_in_rdf_file, RDF_EXTS
+from search_ebook import search_in_ebook_file, EBOOK_EXTS
 
 # --- GUI (main.py) ---
 run_gui = None
@@ -239,10 +242,16 @@ class SearchResults(list):
 
 
 def _default_file_timeout_sec() -> float:
+    """
+    Default 0 = no per-file skip (same behaviour as older effective builds).
+    Set TEXT_SEEKER_FILE_TIMEOUT or --file-timeout to N seconds to enable
+    skip-and-continue. The clock starts when the worker begins the file,
+    not when it is queued.
+    """
     try:
-        return float(os.environ.get("TEXT_SEEKER_FILE_TIMEOUT", "180"))
+        return float(os.environ.get("TEXT_SEEKER_FILE_TIMEOUT", "0"))
     except ValueError:
-        return 180.0
+        return 0.0
 
 
 def search_in_files(
@@ -268,8 +277,8 @@ def search_in_files(
     status_callback: Optional[Callable[[str], None]] = None,
     ocr_skip_paths: Optional[Set[str]] = None,
     include_subfolders: bool = True,
-    max_ocr_pages: int = 40,   # Max pages to run OCR on (0 = unlimited)
-    file_timeout_sec: Optional[float] = None,  # Skip a file after N seconds (0 = no limit)
+    max_ocr_pages: int = 150,   # Max pages to run OCR on (0 = unlimited)
+    file_timeout_sec: Optional[float] = None,  # 0 = no limit (default); else skip after N sec of work
 ) -> List[dict]:
     # Resolver lista de pastas (suporta directory único ou directories)
     roots: List[str] = []
@@ -308,6 +317,16 @@ def search_in_files(
                 _safe_print("[WARN] Tesseract nao encontrado; OCR pode ficar indisponivel.")
     except Exception:
         pass
+    try:
+        from process_utils import resolve_poppler_path
+        pop = resolve_poppler_path()
+        if pop:
+            _safe_print(f"[OK] Poppler: {pop}")
+            os.environ.setdefault("POPPLER_PATH", pop)
+        elif file_types.get("pdf") and ocr_mode in ("auto", "force"):
+            _safe_print("[WARN] Poppler (pdftoppm) nao encontrado; OCR de PDF pode falhar.")
+    except Exception:
+        pass
 
     def _set_status(msg: str) -> None:
         if status_callback:
@@ -336,16 +355,14 @@ def search_in_files(
             for root, _, files in os.walk(root_dir):
                 for name in files:
                     path = os.path.join(root, name)
-                    lower = name.lower()
-                    ext = os.path.splitext(lower)[1]
+                    ext = effective_extension(path)
                     all_files.append((path, ext, root_dir))
         else:
             for name in os.listdir(root_dir):
                 path = os.path.join(root_dir, name)
                 if not os.path.isfile(path):
                     continue
-                lower = name.lower()
-                ext = os.path.splitext(lower)[1]
+                ext = effective_extension(path)
                 all_files.append((path, ext, root_dir))
 
     _safe_print(f"[OK] Found {len(all_files)} file(s) under {len(roots)} folder(s)")
@@ -432,12 +449,19 @@ def search_in_files(
     def _path_of(file_info: Tuple[str, str, str]) -> str:
         return file_info[0]
 
-    def _mark_timeout(file_info: Tuple[str, str, str]) -> None:
+    def _mark_timeout(file_info: Tuple[str, str, str], *, had_results: bool = False) -> None:
         path = _path_of(file_info)
         ev = cancel_flags.get(path)
         if ev is not None:
             ev.set()
         name = os.path.basename(path)
+        if had_results:
+            _safe_print(
+                f"[PARTIAL] Time budget ({int(file_timeout_sec)}s) reached on {name}; "
+                f"kept partial matches"
+            )
+            _set_status(f"Partial (time budget): {name} — continuing...")
+            return
         if path not in skipped_files:
             skipped_files.append(path)
         _safe_print(f"[SKIP] Timed out after {int(file_timeout_sec)}s: {name}")
@@ -446,6 +470,7 @@ def search_in_files(
     def process_file_wrapper(file_info: Tuple[str, str, str]) -> List[dict]:
         path, ext, root_folder = file_info
         cancel_ev = cancel_flags.setdefault(path, threading.Event())
+        # Deadline starts when THIS worker begins the file (not when queued).
         deadline = (
             time.time() + file_timeout_sec
             if file_timeout_sec and file_timeout_sec > 0
@@ -463,7 +488,7 @@ def search_in_files(
         with active_lock:
             active_status[path] = f"file: {os.path.basename(path)}"
         try:
-            return _process_single_file(
+            res = _process_single_file(
                 path, ext, root_folder, parser, context_size, file_types, ocr_mode,
                 occurrence_mode, max_snippets_per_page, ocr_skip_paths,
                 max_ocr_pages=max_ocr_pages,
@@ -472,8 +497,11 @@ def search_in_files(
                 page_callback=_page_cb,
                 should_abort=_should_abort,
             )
+            if cancel_ev.is_set() and file_timeout_sec and file_timeout_sec > 0:
+                _mark_timeout(file_info, had_results=bool(res))
+            return res
         except TimeoutError:
-            _mark_timeout(file_info)
+            _mark_timeout(file_info, had_results=False)
             return []
         finally:
             with active_lock:
@@ -665,7 +693,7 @@ def _process_single_file(
     max_snippets_per_page: int,
     ocr_skip_paths: Set[str],
     *,
-    max_ocr_pages: int = 40,
+    max_ocr_pages: int = 150,
     document_text_cache: Optional[Dict[str, str]] = None,
     cache_lock: Optional[threading.Lock] = None,
     page_callback: Optional[Callable[[str, int, int, str], None]] = None,
@@ -776,6 +804,30 @@ def _process_single_file(
                     should_abort=should_abort,
                 )
             )
+        elif file_types.get("json") and ext in {".json", ".jsonl"}:
+            results.extend(
+                search_in_json_file(
+                    path, parser, context_size,
+                    normalize=normalize_extracted_text,
+                    evaluate_text=_evaluate_text,
+                )
+            )
+        elif file_types.get("ttl") and ext in RDF_EXTS:
+            results.extend(
+                search_in_rdf_file(
+                    path, parser, context_size,
+                    normalize=normalize_extracted_text,
+                    evaluate_text=_evaluate_text,
+                )
+            )
+        elif file_types.get("ebook") and ext in EBOOK_EXTS:
+            results.extend(
+                search_in_ebook_file(
+                    path, parser, context_size,
+                    normalize=normalize_extracted_text,
+                    evaluate_text=_evaluate_text,
+                )
+            )
         elif file_types.get("image") and ext in _IMAGE_EXTS:
             if path in ocr_skip_paths:
                 return results
@@ -799,7 +851,11 @@ def _parse_args():
     ap = argparse.ArgumentParser(prog=CLI_PROG, description=f"{APP_NAME} — pesquisa booleana multi-formato")
     ap.add_argument("--dir", dest="directory", required=False, help="Base directory")
     ap.add_argument("--query", dest="query", required=False, help="Boolean query")
-    ap.add_argument("--types", default="txt,pdf,docx,html,image", help="Comma list of types to enable")
+    ap.add_argument(
+        "--types",
+        default="txt,pdf,docx,html,image",
+        help="Comma list of types: txt,pdf,docx,html,image,md,excel,csv,json,ttl,ebook",
+    )
     ap.add_argument("--minrel", type=float, default=0.1, help="Min relevance score")
     ap.add_argument("--ctx", type=int, default=150, help="Context window size (chars)")
     ap.add_argument("--ocr", choices=["auto", "force", "never"], default="auto", help="OCR mode for PDFs")
@@ -815,10 +871,10 @@ def _parse_args():
                     help="Limite de snippets por página quando --occ all (0 = sem limite)")
     ap.add_argument("--no-subfolders", action="store_true",
                     help="Do not search in subfolders (only the selected folder)")
-    ap.add_argument("--max-ocr-pages", dest="max_ocr_pages", type=int, default=40,
-                    help="Max PDF pages to run OCR on (0=unlimited). Default 40 to avoid long stalls.")
+    ap.add_argument("--max-ocr-pages", dest="max_ocr_pages", type=int, default=150,
+                    help="Max PDF pages to run OCR on (0=unlimited). Default 150.")
     ap.add_argument("--file-timeout", dest="file_timeout", type=float, default=None,
-                    help="Skip a file after N seconds (default 180; 0=no limit). "
+                    help="Optional: stop a file after N seconds of active work (default 0=no limit). "
                          "Env TEXT_SEEKER_FILE_TIMEOUT overrides default.")
 
     ap.add_argument("--gui", action="store_true", help="Launch GUI instead of CLI")
@@ -873,11 +929,23 @@ if __name__ == "__main__":
         sys.exit(2)
 
     # Tipos ativos
-    enabled = {k: False for k in ("txt", "pdf", "docx", "html", "image", "md", "excel", "csv")}
+    enabled = {
+        k: False
+        for k in (
+            "txt", "pdf", "docx", "html", "image", "md", "excel", "csv",
+            "json", "ttl", "ebook",
+        )
+    }
     for t in (args.types or "").split(","):
         t = t.strip().lower()
         if t in enabled:
             enabled[t] = True
+        elif t in {"epub", "fb2"}:
+            enabled["ebook"] = True
+        elif t in {"rdf", "owl", "nt", "n3"}:
+            enabled["ttl"] = True
+        elif t == "jsonl":
+            enabled["json"] = True
 
     # Mensagem útil: Tesseract no PATH (apenas uma vez)
     try:

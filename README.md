@@ -2,9 +2,9 @@
 
 **Repository:** [github.com/LuisMRaimundo/Text-seeker](https://github.com/LuisMRaimundo/Text-seeker)
 
-Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, images via OCR). Runs **offline** on your machine; indexes and caches live under your home directory. The GUI stays responsive during long runs, shows **live progress** (including OCR page status), and **skips files that exceed a time limit** so one stuck PDF cannot freeze a whole batch.
+Multi-format **boolean full-text search** for local documents (PDF, DOCX, HTML, TXT, Markdown, Excel, CSV, JSON, Turtle/RDF, EPUB/FB2, images via OCR). Runs **offline** on your machine; indexes and caches live under your home directory. The GUI stays responsive during long runs and shows **live progress** (including OCR page status). Optional per-file time budgets can stop a stuck file without abandoning the whole batch.
 
-**Supported formats:** TXT, PDF, DOCX, HTML, Markdown, Excel (`.xlsx`/`.xls`), CSV, common image formats (OCR).
+**Supported formats:** TXT, PDF, DOCX, HTML, Markdown, Excel (`.xlsx`/`.xls`), CSV, JSON/JSONL, Turtle/RDF (`.ttl`, `.nt`, `.rdf`, …), EPUB/FB2 ebooks, common image formats (OCR).
 
 ## Requirements
 

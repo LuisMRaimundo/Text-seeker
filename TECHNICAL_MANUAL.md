@@ -21,11 +21,11 @@
 - **Boolean queries** with operators: AND, OR, NOT, NEAR/x
 - **Wildcards**: `*` (zero or more chars), `?` (exactly one char)
 - **Phrases** in double or single quotes
-- **File formats**: TXT, PDF, DOCX, HTML, Markdown, Excel (XLSX/XLS), CSV, Images (OCR)
+- **File formats**: TXT, PDF, DOCX, HTML, Markdown, Excel (XLSX/XLS), CSV, JSON/JSONL, Turtle/RDF (TTL/NT/RDF/OWL), EPUB/FB2 ebooks, Images (OCR)
 - **Output formats**: HTML, TXT, CSV, Excel
 - **Performance features**: Inverted-index search, parallel processing, file caching, BM25 ranking
 - **Responsive GUI**: Search runs off the Tk main thread; progress bar and status update during indexing and search (including live OCR page status)
-- **Stuck-file protection**: Per-file timeout (default 180s) skips a hung/slow file so the batch continues; skipped paths are reported at the end
+- **Optional stuck-file budget**: `--file-timeout` / `TEXT_SEEKER_FILE_TIMEOUT` (default **0** = no limit). When set, the clock starts when a worker begins the file (not while queued); partial page results are kept when possible
 
 The system uses a **shunting-yard** algorithm for query parsing and **RPN** (Reverse Polish Notation) for evaluation. OCR fallback is available for PDFs and images via Tesseract (capped pages, faster DPI/PSM defaults for batch search).
 
@@ -136,7 +136,7 @@ OCR of scanned PDFs/images additionally requires the system tools **Tesseract**
 - `progress_callback(processed, total, remaining_sec)` — fired during **indexing** and **search** phases
 - `status_callback(message)` — human-readable phase text (e.g. `Indexing 120/5000…`, `ocr 12/40: scan.pdf`, `Skipped (timeout): …`)
 
-**Per-file timeout:** Default **180 seconds** (`file_timeout_sec`, env `TEXT_SEEKER_FILE_TIMEOUT`, CLI `--file-timeout`; `0` = unlimited). When exceeded, the file is skipped, workers continue, and the path is listed in `SearchResults.skipped_files` / the GUI completion dialog.
+**Per-file timeout:** Default **0 (disabled)** — finish every file, matching older effective builds. Optional `file_timeout_sec` / env `TEXT_SEEKER_FILE_TIMEOUT` / CLI `--file-timeout` measures **active** work only (starts when the worker picks up the file). On budget expiry, PDF search stops early but still evaluates pages already extracted; empty timed-out files appear in `SearchResults.skipped_files`.
 
 **Indexing phase behaviour:** For each indexable file, `IndexManager.needs_reindex()` runs **before** text extraction. Unchanged files are skipped (no full extract). First run on a large corpus can still take a long time; later runs are much faster.
 
@@ -195,7 +195,13 @@ OCR of scanned PDFs/images additionally requires the system tools **Tesseract**
 
 **Purpose:** `ParallelProcessor` (ThreadPoolExecutor with per-file timeout); `calculate_bm25_score()`.
 
-`process_files_parallel(..., file_timeout_sec=180)` returns `(results, timed_out_items)`. Timed-out futures are abandoned via `shutdown(wait=False)` so one stuck Tesseract/Poppler worker does not block the rest of the batch. Optional `on_timeout(item)` notifies the orchestrator.
+`process_files_parallel(...)` returns `(results, timed_out_items)`. Time budgets are enforced cooperatively inside each worker (not from queue/submit time).
+
+## 4.10b search_json.py / search_rdf.py / search_ebook.py
+
+- **JSON**: `.json`, `.jsonl` — flatten keys/values/strings for boolean search
+- **TTL/RDF**: `.ttl`, `.nt`, `.n3`, `.trig`, `.nq`, `.rdf`, `.owl` — Turtle/N-Triples as text; RDF/XML & OWL via XML text extraction
+- **Ebook**: `.epub`, `.fb2`, `.fb2.zip` — EPUB spine HTML/XHTML; FictionBook XML paragraphs
 
 ## 4.11 save_results.py — Output Writers
 
@@ -446,7 +452,7 @@ python app.py
 - First run with **Use Indexing** builds/refreshes the index — can take a long time but subsequent runs skip unchanged files.
 - For a faster exploratory pass: set **OCR Mode = never**, or temporarily uncheck **Use Indexing**.
 - Prefer **Pre-scan OCR** and skip heavy scanned PDFs when you do not need OCR.
-- Default OCR is capped at **40 pages/PDF** and each file at **180s**; increase `--max-ocr-pages` / `--file-timeout` only when you need deeper OCR.
+- Default OCR is capped at **150 pages/PDF**; optional `--file-timeout` only if you want skip-and-continue on stuck files.
 
 ---
 
@@ -459,7 +465,7 @@ python app.py --dir "C:\Documents" --query "texture AND uniform" --types "txt,pd
 **Options:**
 - `--dir` : Base directory
 - `--query` : Boolean query
-- `--types` : Comma list (txt, pdf, docx, html, image, md, excel, csv)
+- `--types` : Comma list (txt, pdf, docx, html, image, md, excel, csv, json, ttl, ebook)
 - `--minrel` : Min relevance (default 0.1)
 - `--ctx` : Context window size (default 150)
 - `--ocr` : auto | force | never
@@ -468,8 +474,8 @@ python app.py --dir "C:\Documents" --query "texture AND uniform" --types "txt,pd
 - `--occ` : page | all (snippets per page vs per occurrence)
 - `--max-occ` : Limit snippets per page when `--occ all`
 - `--no-subfolders` : Only top-level folder
-- `--max-ocr-pages` : Max PDF pages for OCR (default **40**; `0` = unlimited)
-- `--file-timeout` : Skip a file after N seconds (default **180**; `0` = no limit; env `TEXT_SEEKER_FILE_TIMEOUT`)
+- `--max-ocr-pages` : Max PDF pages for OCR (default **150**; `0` = unlimited)
+- `--file-timeout` : Optional active-work budget per file in seconds (default **0** = no limit; env `TEXT_SEEKER_FILE_TIMEOUT`)
 - `--gui` : Launch GUI
 - `--stem` / `--no-stem` : Enable or disable Porter stemming (default: on in typical GUI use)
 - `--accent-sensitive` : Do not fold accents when matching
@@ -532,7 +538,7 @@ When **Save to multiple files** is enabled and **Max. results per file** is set 
 |---------|--------------|------------|
 | Window frozen, bar stuck at 0% | Old build that ran search on the Tk thread | Update to current `main` and restart the GUI |
 | Status stuck on e.g. Searching 50/80 for a long time | Progress advances when a **whole file** finishes; remaining workers are on heavy OCR | Wait for OCR pages in the status line, or set OCR=never / Pre-scan skip |
-| Dialog lists “Skipped N file(s) that exceeded the time limit” | Per-file timeout (default 180s) fired | Raise `--file-timeout`, or OCR=never / skip those scans |
+| Dialog lists many “Skipped … time limit” files | Older bug timed out files still waiting in the queue; or env timeout set | Update to current `main`; unset `TEXT_SEEKER_FILE_TIMEOUT` or set `--file-timeout 0` |
 | Status shows indexing for a long time | First index of a huge corpus | Wait, or disable indexing / set OCR=never for a quick pass |
 | OCR still too slow on big scans | Page render + Tesseract cost | Defaults already cap pages/DPI/PSM; use Pre-scan OCR or OCR=never |
 

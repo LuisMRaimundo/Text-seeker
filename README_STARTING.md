@@ -53,7 +53,7 @@ _launch_gui_with_fallback()
 
 Search runs on a **background thread**: the window stays responsive and the progress bar / status line update during **indexing** and **search**. During PDF OCR the status can show the active file and page (e.g. `ocr 12/40: scan.pdf`).
 
-If a single file takes too long (default **180 seconds**), it is **skipped** and the batch continues. At the end, the completion dialog lists any timed-out files. Override with env `TEXT_SEEKER_FILE_TIMEOUT` or CLI `--file-timeout` (`0` = no limit).
+By default there is **no per-file time limit** (same as older builds): each PDF is allowed to finish. Optional skip-and-continue: set env `TEXT_SEEKER_FILE_TIMEOUT` or CLI `--file-timeout` to N seconds of *active* work (the clock starts when the worker begins that file, not while it waits in the queue). Partial matches from timed-out PDFs are kept when possible.
 
 The first index build on a very large folder can still take a long time; later runs skip unchanged files (size+mtime). For a faster exploratory pass, set **OCR Mode = never** or temporarily uncheck **Use Indexing**.
 
@@ -67,7 +67,7 @@ python app.py --dir "C:\path\to\docs" --query "textur* AND uniform*" --types "pd
 python app.py --dir "C:\path\to\docs" --query "search terms" --out results.html
 
 # Full options (OCR page cap + per-file timeout)
-python app.py --dir "C:\docs" --query "query" --types "pdf,txt" --minrel 0.5 --ctx 200 --ocr auto --max-ocr-pages 40 --file-timeout 180 --out results.html --fmt html
+python app.py --dir "C:\docs" --query "query" --types "pdf,txt,json,ttl,ebook" --minrel 0.5 --ctx 200 --ocr auto --max-ocr-pages 150 --out results.html --fmt html
 ```
 
 ## Troubleshooting
@@ -176,6 +176,9 @@ text-seeker/
 ├── search_markdown.py        # Markdown
 ├── search_excel.py           # Excel
 ├── search_csv.py             # CSV
+├── search_json.py            # JSON / JSONL
+├── search_rdf.py             # Turtle / RDF / OWL
+├── search_ebook.py           # EPUB / FB2
 ├── ocr_utils.py              # Tesseract integration
 ├── save_results.py           # Export HTML / TXT / CSV / Excel
 ├── requirements.txt          # Python dependencies

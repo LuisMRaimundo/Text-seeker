@@ -5,11 +5,25 @@ import os
 import re
 from typing import Callable, Dict, Optional, Set
 
-__all__ = ["extract_document_text", "should_index_extension"]
+from search_rdf import RDF_EXTS
+from search_ebook import EBOOK_EXTS
+
+__all__ = ["extract_document_text", "should_index_extension", "effective_extension"]
 
 Normalizer = Callable[[str], str]
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+_JSON_EXTS = {".json", ".jsonl"}
+
+
+def effective_extension(filepath: str, ext: Optional[str] = None) -> str:
+    """Return a lowercased extension, including compound ones like .fb2.zip."""
+    lower = (filepath or "").lower()
+    if lower.endswith(".fb2.zip"):
+        return ".fb2.zip"
+    if ext:
+        return ext.lower()
+    return os.path.splitext(lower)[1]
 
 
 def should_index_extension(ext: str, file_types: Dict[str, bool]) -> bool:
@@ -29,6 +43,12 @@ def should_index_extension(ext: str, file_types: Dict[str, bool]) -> bool:
     if file_types.get("pdf") and ext == ".pdf":
         return True
     if file_types.get("image") and ext in _IMAGE_EXTS:
+        return True
+    if file_types.get("json") and ext in _JSON_EXTS:
+        return True
+    if file_types.get("ttl") and ext in RDF_EXTS:
+        return True
+    if file_types.get("ebook") and ext in EBOOK_EXTS:
         return True
     return False
 
@@ -152,7 +172,7 @@ def extract_document_text(
     Extract normalized full-document text for indexing and BM25 (fast path; PDF without OCR).
     """
     normalize = normalize or (lambda s: s)
-    ext = (ext or os.path.splitext(filepath)[1]).lower()
+    ext = effective_extension(filepath, ext)
     raw = ""
 
     if file_types.get("txt") and ext in {".txt", ".log"}:
@@ -176,6 +196,15 @@ def extract_document_text(
             raw = ocr_image_fn(filepath) or ""
         except Exception:
             raw = ""
+    elif file_types.get("json") and ext in _JSON_EXTS:
+        from search_json import extract_json_text
+        raw = extract_json_text(filepath)
+    elif file_types.get("ttl") and ext in RDF_EXTS:
+        from search_rdf import extract_rdf_text
+        raw = extract_rdf_text(filepath)
+    elif file_types.get("ebook") and ext in EBOOK_EXTS:
+        from search_ebook import extract_ebook_text
+        raw = extract_ebook_text(filepath)
 
     if not raw:
         return ""

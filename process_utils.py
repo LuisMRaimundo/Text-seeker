@@ -53,10 +53,32 @@ def configure_hidden_subprocess_windows() -> None:
 
 def _external_process_limit() -> int:
     try:
-        n = int(os.environ.get("TEXT_SEEKER_MAX_EXTERNAL_PROCESSES", "2"))
+        n = int(os.environ.get("TEXT_SEEKER_MAX_EXTERNAL_PROCESSES", "3"))
     except ValueError:
-        n = 2
+        n = 3
     return max(1, min(n, 8))
+
+
+def resolve_poppler_path() -> Optional[str]:
+    """Return Poppler bin dir if found (PATH, POPPLER_PATH, or common installs)."""
+    env = os.environ.get("POPPLER_PATH") or ""
+    if env and os.path.isdir(env):
+        return env
+    import shutil
+    which = shutil.which("pdftoppm") or shutil.which("pdftoppm.exe")
+    if which:
+        return os.path.dirname(os.path.abspath(which))
+    for cand in (
+        r"D:\poppler-24.08.0\Library\bin",
+        r"D:\poppler\Library\bin",
+        r"C:\poppler\Library\bin",
+        r"C:\Program Files\poppler\Library\bin",
+        r"C:\Program Files\poppler\bin",
+    ):
+        exe = os.path.join(cand, "pdftoppm.exe" if sys.platform == "win32" else "pdftoppm")
+        if os.path.isfile(exe):
+            return cand
+    return None
 
 
 def _get_external_sem() -> threading.Semaphore:

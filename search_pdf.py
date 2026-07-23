@@ -4,9 +4,14 @@ from typing import Callable, List, Optional, Any, Dict, Tuple
 import os, re, unicodedata, hashlib, inspect, logging, warnings
 from pathlib import Path
 
-from process_utils import configure_hidden_subprocess_windows, limit_external_processes
+from process_utils import (
+    configure_hidden_subprocess_windows,
+    limit_external_processes,
+    resolve_poppler_path,
+)
 
 configure_hidden_subprocess_windows()
+_POPPLER_PATH = resolve_poppler_path()
 
 # Suppress PyPDF2 warnings for malformed PDFs (e.g. "Multiple definitions in dictionary")
 warnings.filterwarnings("ignore", message=".*Multiple definitions.*", category=UserWarning)
@@ -285,8 +290,11 @@ def _render_page_png(filepath: str, page_num: int, dpi: int, sig: str) -> Option
         return im
     try:
         from pdf2image import convert_from_path
+        kwargs = dict(first_page=page_num, last_page=page_num, dpi=dpi)
+        if _POPPLER_PATH:
+            kwargs["poppler_path"] = _POPPLER_PATH
         with limit_external_processes():
-            pages = convert_from_path(filepath, first_page=page_num, last_page=page_num, dpi=dpi)
+            pages = convert_from_path(filepath, **kwargs)
         if pages:
             im = pages[0]
             _cache_set_png(sig, page_num, im)
@@ -314,7 +322,7 @@ def search_in_pdf_file(
     mining_hook: Optional[MiningHookFn] = None,
     enable_cache: bool = True,
     eval_kwargs: Optional[Dict[str, Any]] = None,   # ← NOVO: kwargs para o evaluate_text (e.g., occurrence_mode)
-    max_ocr_pages: int = 40,   # Limit OCR to first N pages; 0 = unlimited
+    max_ocr_pages: int = 150,   # Limit OCR to first N pages; 0 = unlimited
     use_osd: bool = False,     # OSD rotation is slow (extra Tesseract call per page)
     page_callback: Optional[Callable[[str, int, int, str], None]] = None,
     should_abort: Optional[Callable[[], bool]] = None,
@@ -326,7 +334,8 @@ def search_in_pdf_file(
       2) Compute header/footer sets across pages, strip them. For each page evaluate both the cleaned text
          and the hyphen→space variant, keeping whichever yields higher (#hits, score). Avoid duplicates per page.
 
-    If should_abort() returns True mid-file, raises TimeoutError so the batch can skip this file.
+    If should_abort() returns True mid-file, stop OCR/extract early and still evaluate
+    whatever pages were already collected (partial results).
     """
     if evaluate_text is None:
         raise ValueError("evaluate_text callable is required.")
@@ -347,10 +356,6 @@ def search_in_pdf_file(
             return bool(should_abort())
         except Exception:
             return False
-
-    def _check_abort() -> None:
-        if _aborted():
-            raise TimeoutError(f"Timed out processing {os.path.basename(filepath)}")
 
     def _page_status(page_num: int, total: int, note: str) -> None:
         if page_callback is None:
@@ -412,9 +417,16 @@ def search_in_pdf_file(
     # ---------- phase 1: get best raw text per page (optionally OCR) ----------
     raw_texts: List[str] = []
     origins:   List[str] = []
+    aborted_early = False
 
     for i in range(num_pages):
-        _check_abort()
+        if _aborted():
+            aborted_early = True
+            _log.warning(
+                f"  -> Stopping early after {len(raw_texts)}/{num_pages} pages "
+                f"({os.path.basename(filepath)}); evaluating partial text"
+            )
+            break
         page_num = i + 1
         cands: List[Tuple[str, str]] = []
 
