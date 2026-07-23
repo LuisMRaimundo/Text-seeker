@@ -265,7 +265,12 @@ def _osd_rotate_pil(im: "Image.Image") -> "Image.Image":
     try:
         import pytesseract
         with limit_external_processes():
-            osd = pytesseract.image_to_osd(im, output_type=pytesseract.Output.DICT)
+            try:
+                osd = pytesseract.image_to_osd(
+                    im, output_type=pytesseract.Output.DICT, timeout=30
+                )
+            except TypeError:
+                osd = pytesseract.image_to_osd(im, output_type=pytesseract.Output.DICT)
         rot = int(osd.get("rotate", 0))
         if rot:
             return im.rotate(-rot, expand=True)
@@ -309,14 +314,19 @@ def search_in_pdf_file(
     mining_hook: Optional[MiningHookFn] = None,
     enable_cache: bool = True,
     eval_kwargs: Optional[Dict[str, Any]] = None,   # ← NOVO: kwargs para o evaluate_text (e.g., occurrence_mode)
-    max_ocr_pages: int = 150,   # Limit OCR to first N pages; 0 = unlimited (prevents freeze on 400+ page PDFs)
+    max_ocr_pages: int = 40,   # Limit OCR to first N pages; 0 = unlimited
+    use_osd: bool = False,     # OSD rotation is slow (extra Tesseract call per page)
+    page_callback: Optional[Callable[[str, int, int, str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> List[dict]:
     """
     Two-phase strategy per page:
       1) Collect candidates from PyMuPDF (blocks + text), PyPDF2, pdfminer. Pick the best by quality.
-         If ocr_mode=='force' or best looks like garbage, render + OCR (OSD rotate); cache renders/OCR.
+         If ocr_mode=='force' or best looks like garbage, render + OCR; cache renders/OCR.
       2) Compute header/footer sets across pages, strip them. For each page evaluate both the cleaned text
          and the hyphen→space variant, keeping whichever yields higher (#hits, score). Avoid duplicates per page.
+
+    If should_abort() returns True mid-file, raises TimeoutError so the batch can skip this file.
     """
     if evaluate_text is None:
         raise ValueError("evaluate_text callable is required.")
@@ -324,9 +334,31 @@ def search_in_pdf_file(
     eval_kwargs = dict(eval_kwargs or {})  # garante dict
 
     pdf2image_kwargs = dict(pdf2image_kwargs or {})
-    dpi = int(pdf2image_kwargs.get("dpi", 300))
+    dpi = int(pdf2image_kwargs.get("dpi", 200))
 
     ocr_image_kwargs = dict(ocr_image_kwargs or {})
+    # Multi-PSM autopilot is ~4x slower; batch PDF search uses a single PSM unless overridden.
+    ocr_image_kwargs.setdefault("try_psm", False)
+
+    def _aborted() -> bool:
+        if should_abort is None:
+            return False
+        try:
+            return bool(should_abort())
+        except Exception:
+            return False
+
+    def _check_abort() -> None:
+        if _aborted():
+            raise TimeoutError(f"Timed out processing {os.path.basename(filepath)}")
+
+    def _page_status(page_num: int, total: int, note: str) -> None:
+        if page_callback is None:
+            return
+        try:
+            page_callback(filepath, page_num, total, note)
+        except Exception:
+            pass
 
     # ---------- open PDF backends lazily ----------
     reader = None
@@ -382,6 +414,7 @@ def search_in_pdf_file(
     origins:   List[str] = []
 
     for i in range(num_pages):
+        _check_abort()
         page_num = i + 1
         cands: List[Tuple[str, str]] = []
 
@@ -429,6 +462,13 @@ def search_in_pdf_file(
                 _log.info(f"  -> OCR limited to first {max_ocr_pages} pages (remaining use extracted text)")
 
         if need_ocr:
+            ocr_cap = max_ocr_pages if max_ocr_pages > 0 else num_pages
+            _page_status(page_num, ocr_cap, "ocr")
+            if page_num == 1 or page_num % 5 == 0:
+                _log.info(
+                    f"  -> OCR page {page_num}/{min(num_pages, ocr_cap)} "
+                    f"({os.path.basename(filepath)})"
+                )
             im = _render_page_png(filepath, page_num, dpi=dpi, sig=sig)
             if im is not None:
                 if enable_cache:
@@ -438,18 +478,26 @@ def search_in_pdf_file(
                 if cached:
                     ocr_text = cached
                 else:
-                    im_rot = _osd_rotate_pil(im)
+                    im_rot = _osd_rotate_pil(im) if use_osd else im
                     try:
                         if ocr_image_fn is not None:
                             ocr_text = ocr_image_fn(im_rot, **ocr_image_kwargs)
                         else:
                             try:
                                 import pytesseract
-                                ocr_text = pytesseract.image_to_string(
-                                    im_rot,
-                                    lang=ocr_image_kwargs.get("lang", "por+eng"),
-                                    config=ocr_image_kwargs.get("tess_config", "--oem 3 --psm 6")
-                                )
+                                with limit_external_processes():
+                                    _kw = dict(
+                                        lang=ocr_image_kwargs.get("lang", "por+eng"),
+                                        config=ocr_image_kwargs.get(
+                                            "tess_config", "--oem 3 --psm 6"
+                                        ),
+                                        timeout=int(ocr_image_kwargs.get("timeout", 45) or 45),
+                                    )
+                                    try:
+                                        ocr_text = pytesseract.image_to_string(im_rot, **_kw)
+                                    except TypeError:
+                                        _kw.pop("timeout", None)
+                                        ocr_text = pytesseract.image_to_string(im_rot, **_kw)
                             except Exception:
                                 ocr_text = ""
                     except Exception:
@@ -464,7 +512,8 @@ def search_in_pdf_file(
         origins.append(best_src)
 
         # Progress log for large PDFs (avoids "appears frozen" when processing 400+ pages)
-        if log_every and page_num % log_every == 0:
+        if (not need_ocr) and log_every and page_num % log_every == 0:
+            _page_status(page_num, num_pages, "extract")
             _log.info(f"  -> Page {page_num}/{num_pages}")
 
     # ---------- compute header/footer sets across pages ----------

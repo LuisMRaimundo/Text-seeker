@@ -230,6 +230,21 @@ def scan_ocr_candidates(directory: str, file_types: Dict[str, bool], max_pages: 
 # =========================
 # Orquestrador principal
 # =========================
+class SearchResults(list):
+    """Result list that also carries skip metadata for the GUI/CLI summary."""
+
+    def __init__(self, items=(), *, skipped_files: Optional[List[str]] = None):
+        super().__init__(items)
+        self.skipped_files: List[str] = list(skipped_files or [])
+
+
+def _default_file_timeout_sec() -> float:
+    try:
+        return float(os.environ.get("TEXT_SEEKER_FILE_TIMEOUT", "180"))
+    except ValueError:
+        return 180.0
+
+
 def search_in_files(
     directory: Optional[str] = None,
     boolean_query: str = "",
@@ -253,7 +268,8 @@ def search_in_files(
     status_callback: Optional[Callable[[str], None]] = None,
     ocr_skip_paths: Optional[Set[str]] = None,
     include_subfolders: bool = True,
-    max_ocr_pages: int = 150,   # Max pages to run OCR on (0 = unlimited)
+    max_ocr_pages: int = 40,   # Max pages to run OCR on (0 = unlimited)
+    file_timeout_sec: Optional[float] = None,  # Skip a file after N seconds (0 = no limit)
 ) -> List[dict]:
     # Resolver lista de pastas (suporta directory único ou directories)
     roots: List[str] = []
@@ -392,57 +408,114 @@ def search_in_files(
         _set_status(f"Searching {len(all_files)} file(s)...")
 
     ocr_skip_paths = set(ocr_skip_paths or [])
+    if file_timeout_sec is None:
+        file_timeout_sec = _default_file_timeout_sec()
+    file_timeout_sec = float(file_timeout_sec)
 
     # Process files (with or without parallel processing)
     search_total = len(all_files)
     _set_status(f"Searching {search_total} file(s)...")
-    if use_parallel and parallel_processor and search_total > 10:
-        _safe_print(f"[...] Processing {search_total} files in parallel...")
-        def process_file_wrapper(file_info: Tuple[str, str, str]) -> List[dict]:
-            path, ext, root_folder = file_info
+    # Track in-flight work so the UI does not look frozen while OCR runs inside one file
+    active_lock = threading.Lock()
+    active_status: Dict[str, str] = {}
+    cancel_flags: Dict[str, threading.Event] = {}
+    skipped_files: List[str] = []
+
+    def _page_cb(filepath: str, page: int, total: int, note: str) -> None:
+        name = os.path.basename(filepath)
+        label = f"{note} {page}/{total}: {name}" if note else f"{page}/{total}: {name}"
+        with active_lock:
+            active_status[filepath] = label
+            sample = list(active_status.values())[:2]
+        _set_status(" | ".join(sample) if sample else label)
+
+    def _path_of(file_info: Tuple[str, str, str]) -> str:
+        return file_info[0]
+
+    def _mark_timeout(file_info: Tuple[str, str, str]) -> None:
+        path = _path_of(file_info)
+        ev = cancel_flags.get(path)
+        if ev is not None:
+            ev.set()
+        name = os.path.basename(path)
+        if path not in skipped_files:
+            skipped_files.append(path)
+        _safe_print(f"[SKIP] Timed out after {int(file_timeout_sec)}s: {name}")
+        _set_status(f"Skipped (timeout): {name} — continuing...")
+
+    def process_file_wrapper(file_info: Tuple[str, str, str]) -> List[dict]:
+        path, ext, root_folder = file_info
+        cancel_ev = cancel_flags.setdefault(path, threading.Event())
+        deadline = (
+            time.time() + file_timeout_sec
+            if file_timeout_sec and file_timeout_sec > 0
+            else None
+        )
+
+        def _should_abort() -> bool:
+            if cancel_ev.is_set():
+                return True
+            if deadline is not None and time.time() >= deadline:
+                cancel_ev.set()
+                return True
+            return False
+
+        with active_lock:
+            active_status[path] = f"file: {os.path.basename(path)}"
+        try:
             return _process_single_file(
                 path, ext, root_folder, parser, context_size, file_types, ocr_mode,
                 occurrence_mode, max_snippets_per_page, ocr_skip_paths,
                 max_ocr_pages=max_ocr_pages,
                 document_text_cache=document_text_cache,
                 cache_lock=cache_lock,
+                page_callback=_page_cb,
+                should_abort=_should_abort,
             )
-        start_time = time.time()
+        except TimeoutError:
+            _mark_timeout(file_info)
+            return []
+        finally:
+            with active_lock:
+                active_status.pop(path, None)
 
-        def _parallel_progress(p: int, t: int) -> None:
-            _report_progress(p, t, start_time, progress_callback)
-            if p == 1 or p % 5 == 0 or p == t:
-                _set_status(f"Searching {p}/{t} file(s)...")
+    start_time = time.time()
 
-        file_results = parallel_processor.process_files_parallel(
-            all_files,
-            process_file_wrapper,
-            progress_callback=_parallel_progress,
-        )
-        for file_result_list in file_results:
-            results.extend(file_result_list)
+    def _parallel_progress(p: int, t: int) -> None:
+        _report_progress(p, t, start_time, progress_callback)
+        with active_lock:
+            sample = list(active_status.values())[:2]
+        if sample:
+            _set_status(f"Searching {p}/{t} — " + " | ".join(sample))
+        elif p == 1 or p % 5 == 0 or p == t:
+            _set_status(f"Searching {p}/{t} file(s)...")
+
+    # Always go through the timeout-aware pool (serial = 1 worker)
+    workers = parallel_processor.max_workers if (
+        use_parallel and parallel_processor and search_total > 10
+    ) else 1
+    processor = ParallelProcessor(max_workers=workers)
+    if workers > 1:
+        _safe_print(f"[...] Processing {search_total} files in parallel...")
     else:
-        start_time = time.time()
-        processed = 0
-        for path, ext, root_folder in all_files:
-            try:
-                file_results = _process_single_file(
-                    path, ext, root_folder, parser, context_size, file_types, ocr_mode,
-                    occurrence_mode, max_snippets_per_page, ocr_skip_paths,
-                    max_ocr_pages=max_ocr_pages,
-                    document_text_cache=document_text_cache,
-                    cache_lock=cache_lock,
-                )
-                results.extend(file_results)
-            except KeyboardInterrupt:
-                raise
-            except Exception as e:
-                print(f"Search error {path}: {e}")
-            finally:
-                processed += 1
-                _report_progress(processed, search_total, start_time, progress_callback)
-                if processed == 1 or processed % 5 == 0 or processed == search_total:
-                    _set_status(f"Searching {processed}/{search_total} file(s)...")
+        _safe_print(f"[...] Processing {search_total} file(s)...")
+
+    for path, _ext, _root in all_files:
+        cancel_flags[path] = threading.Event()
+
+    file_results, timed_out_items = processor.process_files_parallel(
+        all_files,
+        process_file_wrapper,
+        progress_callback=_parallel_progress,
+        file_timeout_sec=file_timeout_sec if file_timeout_sec > 0 else None,
+        on_timeout=_mark_timeout,
+    )
+    for file_result_list in file_results:
+        results.extend(file_result_list)
+    for item in timed_out_items:
+        path = _path_of(item) if isinstance(item, tuple) else str(item)
+        if path not in skipped_files:
+            skipped_files.append(path)
 
     # Apply BM25 ranking improvement if multiple results
     if len(results) > 1:
@@ -498,7 +571,18 @@ def search_in_files(
                 output_format=fmt
             )
 
-    return results
+    if skipped_files:
+        names = [os.path.basename(p) for p in skipped_files]
+        preview = ", ".join(names[:8])
+        more = f" (+{len(names) - 8} more)" if len(names) > 8 else ""
+        _safe_print(f"[WARN] Skipped {len(skipped_files)} timed-out file(s): {preview}{more}")
+        _set_status(
+            f"Done. {len(results)} hits. Skipped {len(skipped_files)} timed-out file(s)."
+        )
+    else:
+        _set_status(f"Done. {len(results)} hits.")
+
+    return SearchResults(results, skipped_files=skipped_files)
 
 
 def _improve_ranking_with_bm25(results: List[dict], parser: BooleanSearchParser) -> List[dict]:
@@ -581,9 +665,11 @@ def _process_single_file(
     max_snippets_per_page: int,
     ocr_skip_paths: Set[str],
     *,
-    max_ocr_pages: int = 150,
+    max_ocr_pages: int = 40,
     document_text_cache: Optional[Dict[str, str]] = None,
     cache_lock: Optional[threading.Lock] = None,
+    page_callback: Optional[Callable[[str, int, int, str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> List[dict]:
     """Process a single file and return results (cada dict inclui root_folder)."""
     results = []
@@ -675,10 +761,19 @@ def _process_single_file(
                     evaluate_text=_evaluate_text,               # função única de avaliação
                     ocr_image_fn=extract_text_from_image,       # OCR de imagem
                     pdfminer_fn=None,                           # auto-resolve no módulo
-                    pdf2image_kwargs={"dpi": 300},
-                    ocr_image_kwargs={"lang": "por+eng", "tess_config": "--oem 3 --psm 6"},
+                    # 200 DPI + single PSM: ~8–12x faster than 300 DPI multi-PSM (was stalling for hours)
+                    pdf2image_kwargs={"dpi": 200},
+                    ocr_image_kwargs={
+                        "lang": "por+eng",
+                        "tess_config": "--oem 3 --psm 6",
+                        "try_psm": False,
+                        "timeout": 45,
+                    },
                     eval_kwargs=eval_kwargs,
-                    max_ocr_pages=max_ocr_pages
+                    max_ocr_pages=max_ocr_pages,
+                    use_osd=False,
+                    page_callback=page_callback,
+                    should_abort=should_abort,
                 )
             )
         elif file_types.get("image") and ext in _IMAGE_EXTS:
@@ -720,8 +815,11 @@ def _parse_args():
                     help="Limite de snippets por página quando --occ all (0 = sem limite)")
     ap.add_argument("--no-subfolders", action="store_true",
                     help="Do not search in subfolders (only the selected folder)")
-    ap.add_argument("--max-ocr-pages", dest="max_ocr_pages", type=int, default=150,
-                    help="Max PDF pages to run OCR on (0=unlimited). Default 150 to avoid freezes.")
+    ap.add_argument("--max-ocr-pages", dest="max_ocr_pages", type=int, default=40,
+                    help="Max PDF pages to run OCR on (0=unlimited). Default 40 to avoid long stalls.")
+    ap.add_argument("--file-timeout", dest="file_timeout", type=float, default=None,
+                    help="Skip a file after N seconds (default 180; 0=no limit). "
+                         "Env TEXT_SEEKER_FILE_TIMEOUT overrides default.")
 
     ap.add_argument("--gui", action="store_true", help="Launch GUI instead of CLI")
     ap.add_argument("--stem", dest="stem", action="store_true", default=None,
@@ -806,5 +904,11 @@ if __name__ == "__main__":
         accent_fold=not args.accent_sensitive,
         include_subfolders=not args.no_subfolders,
         max_ocr_pages=args.max_ocr_pages,
+        file_timeout_sec=args.file_timeout,
     )
     _safe_print(f"[OK] {len(res)} matches")
+    skipped = getattr(res, "skipped_files", None) or []
+    if skipped:
+        _safe_print(f"[WARN] {len(skipped)} file(s) skipped due to timeout:")
+        for p in skipped:
+            _safe_print(f"  - {p}")

@@ -152,6 +152,7 @@ def extract_text_from_image(
     lang: str = "por+eng",
     tess_config: str = "--oem 3 --psm 6",
     try_psm: bool = True,
+    timeout: int = 45,
 ) -> str:
     """
     Extrai texto de caminho ou PIL.Image usando Tesseract.
@@ -209,11 +210,18 @@ def extract_text_from_image(
     except Exception:
         pass
 
+    ocr_timeout = int(timeout) if timeout and timeout > 0 else 0
+
     def _ocr_with_conf(_img, _cfg):
         try:
-            data = pytesseract.image_to_data(
-                _img, lang=lang, config=_cfg, output_type=pytesseract.Output.DICT
-            )
+            kwargs = dict(lang=lang, config=_cfg, output_type=pytesseract.Output.DICT)
+            if ocr_timeout:
+                kwargs["timeout"] = ocr_timeout
+            try:
+                data = pytesseract.image_to_data(_img, **kwargs)
+            except TypeError:
+                kwargs.pop("timeout", None)
+                data = pytesseract.image_to_data(_img, **kwargs)
             confs = [
                 float(c) for c in data.get("conf", [])
                 if isinstance(c, (int, float, str)) and str(c).strip() not in {"", "-1"}

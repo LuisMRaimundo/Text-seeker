@@ -151,8 +151,21 @@ def run_interface(search_fn):
                                 msg += f"\nSaved to multiple files. Open the index: {base}_INDEX.html"
                             else:
                                 msg += f"\nSaved to {out}"
+                        skipped = getattr(results, "skipped_files", None) or []
+                        if skipped:
+                            names = [os.path.basename(p) for p in skipped]
+                            preview = "\n".join(f"  • {n}" for n in names[:12])
+                            more = f"\n  … and {len(names) - 12} more" if len(names) > 12 else ""
+                            msg += (
+                                f"\n\nSkipped {len(skipped)} file(s) that exceeded "
+                                f"the time limit:\n{preview}{more}"
+                            )
+                            status_label.config(
+                                text=f"Done. Skipped {len(skipped)} timed-out file(s)."
+                            )
+                        else:
+                            status_label.config(text="Ready.")
                         messagebox.showinfo("Search Complete", msg)
-                        status_label.config(text="Ready.")
                         prog_var.set(100.0)
                 ui_queue.task_done()
         except queue.Empty:
